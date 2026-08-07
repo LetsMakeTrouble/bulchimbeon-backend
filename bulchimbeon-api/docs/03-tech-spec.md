@@ -144,9 +144,10 @@ OPENAI_API_KEY=sk-...
 LLM_MODEL_ANSWER=gpt-5-mini         # ④ 답변 생성
 LLM_MODEL_VERIFY=gpt-5-mini         # ⑤ 근거 검증 전용 — 생성과 분리 가능하게 별도 env
 LLM_MODEL_TRANSLATE=gpt-5-mini      # ① 번역 · ⑦ 구조화
-LLM_REASONING_EFFORT=minimal        # 지연 예산 달성의 필수 조건
-LLM_TIMEOUT_SECONDS=45              # 단건 호출 타임아웃 (15초는 추론 모델에 비현실적)
-LLM_PIPELINE_DEADLINE_SECONDS=25    # 파이프라인 전체 데드라인
+LLM_REASONING_EFFORT=minimal        # M-1 실측: 지원됨(400 아님). 지연 예산 달성의 필수 조건
+LLM_TIMEOUT_SECONDS=45              # 단건 호출 타임아웃 (M-1 실측 p90 8.09s 대비 충분)
+LLM_PIPELINE_DEADLINE_SECONDS=25    # 🟢/🟡 경로 데드라인 (3회 호출, M-1 실측 p90 24.3s)
+LLM_PIPELINE_DEADLINE_RED_SECONDS=35  # 🔴 경로 데드라인 (4회 호출 — ⑦구조화 추가, M-1 실측 p90 32.4s)
 EMBEDDING_MODEL=text-embedding-3-small
 EMBEDDING_DIM=1536                  # 응답 차원 검증 + dimensions 파라미터용. 벡터 컬럼은 vector(1536) 리터럴 고정
 
@@ -234,5 +235,5 @@ uv run python scripts/seed.py
   **access token을 URL에 싣지 않는다** — 쿼리 문자열은 프록시 로그·리퍼러·브라우저 히스토리에 남아 30분짜리 자격증명이 유출된다. 티켓은 검증 즉시 폐기한다.
   access token 만료 시 서버가 스트림을 종료하고, 프론트는 refresh 후 **새 티켓**으로 재연결한다.
 - 에러 응답 포맷 통일: `{"error": {"code": "...", "message": "..."}}` — 코드 체계는 05-api-contract.md §1.4.
-- 성능 목표: 질문 접수 202 응답 < 500ms. **파이프라인 완료 지연은 `LLM_REASONING_EFFORT=minimal` 기준으로 M-1 캘리브레이션 실측 후 확정**한다(현재 목표치 20초는 미검증 가정).
-  `LLM_PIPELINE_DEADLINE_SECONDS=25` 초과 시에는 그 시점까지의 결과로 🟡 발행 + 카드 생성(안전망)으로 빠진다.
+- 성능 목표: 질문 접수 202 응답 < 500ms. **파이프라인 완료 지연은 M-1 캘리브레이션으로 확정**됐다(2026-08-07, n=8) — 🟢/🟡 경로 **25초**, 🔴 경로 **35초**. 산출 근거와 호출 방식 고정(`responses.parse`)은 `06 §0`.
+  데드라인 초과 시에는 그 시점까지의 결과로 🟡 발행 + 카드 생성(안전망)으로 빠진다.

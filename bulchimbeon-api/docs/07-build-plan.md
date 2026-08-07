@@ -7,7 +7,7 @@
 
 | M | 이름 | 프롬프트 | 산출물 | DoD |
 | --- | --- | --- | --- | --- |
-| **M-1** | 캘리브레이션 게이트 🔒 | `prompts/00-calibration.md` | `scripts/probe_calibration.py` 실행 결과(유사도 분포표 + 지연 실측표), 확정된 설정값 | ① `s_floor`·`s_ceil`·`reuse_threshold` **확정**(시드 질문셋 대비 🟢/🟡/🔴 분포가 의도대로 나오는 값) ② `LLM_REASONING_EFFORT=minimal` **지원 여부와 실측 지연 확정** ③ `SELECT extversion FROM pg_extension WHERE extname='vector'` → **0.8.0 이상 확인** |
+| **M-1** ✅ | 캘리브레이션 게이트 🔒 **완료 2026-08-07** | `prompts/00-calibration.md` | `scripts/probe_calibration.py` 실행 결과(유사도 분포표 + 지연 실측표), 확정된 설정값 | ① `s_floor`·`s_ceil`·`reuse_threshold` **확정**(시드 질문셋 대비 🟢/🟡/🔴 분포가 의도대로 나오는 값) ② `LLM_REASONING_EFFORT=minimal` **지원 여부와 실측 지연 확정** ③ `SELECT extversion FROM pg_extension WHERE extname='vector'` → **0.8.0 이상 확인** |
 | **M0** | 스캐폴딩 | `prompts/00-kickoff.md` | 레포 구조, uv, docker-compose(pgvector), Alembic 초기화, config, 에러 포맷, /health, CI(ruff+pytest) | `docker compose up` 후 `/health` ok, `pytest` 통과 |
 | **M1** | 인증·프로젝트·멤버 | `prompts/01-auth-projects.md` | JWT 가입/로그인/refresh, 프로젝트 CRUD, 초대 코드 참여, 역할 강제, 설정·지침, 담당자 교체 | 역할 403 테스트, 초대 코드 플로우 테스트 통과 |
 | **M2** | 문서 인제스트 | `prompts/02-documents-ingest.md` | 업로드(MD/TXT/PDF/DOCX), 버전 관리, 활성 전환, 파싱→청킹→임베딩, 원문 열람 | 4개 포맷 업로드 → chunks 생성 확인, 활성 버전 1개 제약 |
@@ -25,6 +25,14 @@
 ### M-1을 맨 앞에 두는 이유
 
 임계값 세트(80/50/0.92/0.85)는 `ada-002` 시대(평균 코사인 ≈0.85) 캘리브레이션이다. `text-embedding-3-small`은 평균 ≈0.43이므로 **리스케일 파라미터를 실측 없이 두면 🟢이 한 건도 나오지 않는다.** 이 결함은 `FakeLLMProvider`의 해시 기반 벡터로는 원리적으로 검출되지 않으므로(`06 §5`), **테스트가 전부 초록인 채로 데모 당일에 발견된다.** 15분의 프로브가 그 시나리오를 막는다.
+
+> ✅ **M-1 실측(2026-08-07)이 이 예측을 확인했다.** 원시 스케일에서 🟢 대역 9건 중 **S≥80이 0건**이었다(최대 Q6 72). 리스케일 도입이 확정됐다.
+> 더불어 **예측하지 못했던 결함 두 개**가 추가로 드러났다:
+> 1. **시드 검색 실패** — Q3("지원하는 통화가 뭐예요?")가 `Sandbox` 청크를 top-1로 잡았다. `currency`가 5개 필드를 나열하는 다목적 청크에 묻혀 있었기 때문. 결정 1.7에 따라 임계값이 아니라 시드를 보강했다(`08 §2`에 `Currencies` 청크 신설, 21→22청크).
+> 2. **부분 UNIQUE 단일 UPDATE의 행 순서 의존성** — 문서는 "23505로 실패한다"를 전제했으나 실제로는 **절반이 통과**한다(`04 §7`). 항상 실패하는 것보다 위험하다.
+>
+> 둘 다 `FakeLLMProvider`로는 검출 불가능한 부류이며, M3 이후에 발견됐다면 파이프라인 테스트를 다시 썼어야 했다.
+> 실제 소요는 15분 예상보다 길었다(재실행 1회 + 손 조정 + 지연 분포 n=8 + SQL 프로브 확장).
 
 M-1 산출 표(유사도 분포 · 지연 실측)는 그대로 발표 자료로 재사용한다.
 

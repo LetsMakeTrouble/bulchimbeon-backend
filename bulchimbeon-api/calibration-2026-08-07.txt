@@ -1,0 +1,167 @@
+
+불침번 M-1 캘리브레이션 게이트 — probe_calibration.py
+임베딩 text-embedding-3-small(1536d) / 생성 gpt-5-mini
+시드 청크 22개 · 질문 13건 (retrieval_top_k=6 보다 충분히 큰지 확인: OK)
+판정 기준은 파일 상단 독스트링의 사전 등록 표를 따른다 — 결과를 보고 기준을 바꾸지 않는다.
+
+임베딩 중...
+
+==============================================================================
+  판정 1 — 검색 점수 스케일 (원시 코사인 → S)
+==============================================================================
+  `S_raw = round(sim_raw x 100)` 은 **리스케일 전** 값이다. 등급도 리스케일 전 기준.
+
+  #   | 질문(ko)                                       | top-1 근거                   | sim_raw | S_raw | 등급@80/50 | 기대               
+  ----+------------------------------------------------+------------------------------+---------+-------+------------+--------------------
+  Q1  | 주문 조회 API 응답에 user_id 포함되나요?       | GET /v2/orders/{order_id}    |  0.5283 |    53 | YELLOW     | green              
+  Q2  | 액세스 토큰 만료 시간이 어떻게 되나요?         | Authentication               |  0.6289 |    63 | YELLOW     | green              
+  Q3  | 지원하는 통화가 뭐예요?                        | Currencies                   |  0.4891 |    49 | RED        | green              
+  Q4  | 목록 조회 페이지네이션 방식 알려주세요         | Pagination                   |  0.6371 |    64 | YELLOW     | green              
+  Q5  | 웹훅 재시도 정책이 있나요?                     | API and Rate Limits          |  0.4811 |    48 | RED        | green~yellow       
+  Q6  | 배송비도 환불되나요?                           | Shipping Fees                |  0.7191 |    72 | YELLOW     | green              
+  Q7  | API 요청 제한이 분당 몇 회인가요?              | Rate Limiting                |  0.6886 |    69 | YELLOW     | red(conflict)      
+  Q8  | 환불 정책이 일본 리전에도 동일하게 적용되나요? | Regions                      |  0.4202 |    42 | RED        | red(no_evidence)   
+  Q9  | 결제 게이트웨이는 어떤 PG사를 쓰나요?          | JP Launch                    |  0.3645 |    36 | RED        | red(no_ev|low_conf)
+  Q10 | 일본 리전 환불 정책도 동일하게 적용되나요?     | Regions                      |  0.4107 |    41 | RED        | green(reused)      
+  Q11 | 웹훅 서명은 어떻게 검증하나요?                 | Webhook Signature Verificati |  0.6387 |    64 | YELLOW     | green              
+  Q12 | 멱등키는 얼마나 유지되나요?                    | Idempotency                  |  0.5342 |    53 | YELLOW     | green              
+  Q13 | 샌드박스에서 실제 결제가 발생하나요?           | Sandbox                      |  0.6393 |    64 | YELLOW     | green              
+
+  🟢 기대 대역(Q1~Q6·Q11~Q13): 최소 0.4811 / 중앙 0.6289 / 최대 0.7191
+  원시 S≥80 인 건수: 0/9      원시 S<50 인 건수: 2/9
+
+  판정: 리스케일 도입 **확정** — 원시 스케일로는 🟢에 도달하는 질문이 없다.
+
+  제안: s_floor = 0.344  (관측 최소 0.3645 - 0.02)
+        s_ceil  = 0.679  (관측 상위 10% 지점)
+
+  제안값을 적용했을 때의 등급 (여기가 실제 판단 근거다):
+  #   | sim_raw | S(리스케일) | 등급   | 기대                | 일치       
+  ----+---------+-------------+--------+---------------------+------------
+  Q1  |  0.5283 |          55 | YELLOW | green               | OK         
+  Q2  |  0.6289 |          85 | GREEN  | green               | OK         
+  Q3  |  0.4891 |          43 | RED    | green               | MISMATCH   
+  Q4  |  0.6371 |          87 | GREEN  | green               | OK         
+  Q5  |  0.4811 |          41 | RED    | green~yellow        | MISMATCH   
+  Q6  |  0.7191 |         100 | GREEN  | green               | OK         
+  Q7  |  0.6886 |         100 | GREEN  | red(conflict)       | —(④/판정 4)
+  Q8  |  0.4202 |          23 | RED    | red(no_evidence)    | —(④/판정 4)
+  Q9  |  0.3645 |           6 | RED    | red(no_ev|low_conf) | —(④/판정 4)
+  Q10 |  0.4107 |          20 | RED    | green(reused)       | —(재사용)  
+  Q11 |  0.6387 |          88 | GREEN  | green               | OK         
+  Q12 |  0.5342 |          57 | YELLOW | green               | OK         
+  Q13 |  0.6393 |          88 | GREEN  | green               | OK         
+
+  기대 일치(🟢 대역 7/9) — 🟢 대역에 MISMATCH 가 있을 때만 s_floor/s_ceil 을 조정해 재실행한다.
+  Q7·Q8·Q9 의 S 가 높게 나오는 것은 정상이다(강제 🔴 은 ④ conflict/not_answerable 플래그가 잡는다 — 06 §2④, 판정 4).
+
+==============================================================================
+  판정 4 — 강제 🔴 분리 가능성 (similarity_floor)
+==============================================================================
+  항목                   | 값     | 해석                                             
+  -----------------------+--------+--------------------------------------------------
+  🟢 기대대역 top-1 최소 | 0.4811 | 🟢 대역 하단                                     
+  Q9 top-1 (무근거)      | 0.3645 | 분리 가능                                        
+  Q7 top-1 (충돌)        | 0.6886 | 충돌은 유사도가 아니라 ④ conflict 플래그로 잡는다
+
+  판정: 유사도만으로 Q9 분리 **가능**. 제안 similarity_floor = 0.423 (Q9 0.3645 와 🟢 하단 0.4811 의 중간)
+
+  참고: Q9 의 top-1 근거는 `Partner Sync Notes - July 2026 > JP Launch` 였다 — 미끼 청크가 실제로 걸리는지 확인한다.
+
+==============================================================================
+  판정 2 — 재사용 임계값 (reuse_threshold / similar_threshold)
+==============================================================================
+  항목                               | 값                          
+  -----------------------------------+-----------------------------
+  Q8 ↔ Q10 (같은 질문 — 재사용 목표) | 0.9551                      
+  기본값 0.92 도달 여부              | 도달                        
+  무관 질문쌍 최대 (Q6↔Q10)          | 0.4764                      
+  2·3위 무관쌍                       | Q2↔Q12 0.4584 / Q6↔Q8 0.4540
+
+  판정: 기본값 0.92 로도 재사용이 성립한다. 그래도 실측값 기준으로 여유를 둔다.
+
+  제안: reuse_threshold   = 0.925  (관측 0.9551 - 0.03)
+        similar_threshold = 0.855  (원본 0.92/0.85 간격 0.07 보존)
+
+  안전 여유: 제안 임계값과 무관쌍 최대의 간격 = +0.4486
+
+  어느 쪽이든 **LLM 동일성 2차 게이트는 구현한다** (단일 임계값 의존 제거, 결정서 1.1).
+  게이트에서 걸러진 건은 `answer.reuse_missed` 이벤트로 기록해야 재질문 즉답률 분모가 생긴다(D26).
+
+==============================================================================
+  판정 3 — LLM 호출 규약 · 지연 (strict JSON 스키마)
+==============================================================================
+  모델 gpt-5-mini / 스키마는 파이프라인 ④ 와 동일 (전 필드 required · additionalProperties=false · 기본값 필드 없음 · text_ko 포함)
+
+  호출 방식            | 파라미터      | 지연    | 결과 | 비고                                                                                                          
+  ---------------------+---------------+---------+------+---------------------------------------------------------------------------------------------------------------
+  responses.parse 계열 | minimal       |  12.18s | OK   |                                                                                                               
+  responses.parse 계열 | medium        |  21.63s | OK   |                                                                                                               
+  chat.completions     | minimal       |   9.17s | OK   |                                                                                                               
+  chat.completions     | temperature=0 |    -    | 400  | Error code: 400 - {'error': {'message': "Unsupported value: 'temperature' does not support 0 with this model. 
+
+  ④형 단건 지연 12.18s × 호출수 = **보수적 상한 근사** — ①번역·⑦구조화를 ④ 와
+  같은 비용으로 치는 상향 가정과, 단건 프롬프트라는 하향 가정이 섞여 부호가 상쇄된다.
+  경로                           | LLM 호출 | 추정 총 지연 | 데드라인 25s
+  -------------------------------+----------+--------------+-------------
+  🟢/🟡 (①번역 ④생성 ⑤검증)      | 3회      |        36.5s | **초과**    
+  🔴 (①번역 ④생성 ⑤검증 ⑦구조화) | 4회      |        48.7s | **초과**    
+  최악 (④ 재시도 2회 포함)       | 6회      |        73.1s | **초과**    
+
+  ⚠️ 데드라인 붕괴: `06 §0` 성능 목표를 재기술하고 ①/⑧ 병렬화 또는 ④⑤ 병합을 검토한다.
+  이 표만으로 '안전'을 선언하지 않는다 — 최종 확정은 `06:247` M3 실LLM 스모크와 M9 리허설이다.
+
+  ⚠️ 어느 방식이 통과하든 **두 호출 방식을 섞지 않는다** (결정서 1.9). 하나를 골라 프로바이더에 고정한다.
+  ⚠️ `temperature`/`top_p`/`presence_penalty`/`frequency_penalty`/`seed` 는 전달하지 않는다.
+     `max_tokens` 가 아니라 `max_completion_tokens` 다.
+
+==============================================================================
+  최종 산출 — projects.settings (DEFAULT_SETTINGS 에 그대로 반영)
+==============================================================================
+
+{
+  "green_threshold": 80,
+  "yellow_threshold": 50,
+  "grounding_min": 60,
+  "s_floor": 0.344,
+  "s_ceil": 0.679,
+  "similarity_floor": 0.423,
+  "reuse_threshold": 0.925,
+  "similar_threshold": 0.855,
+  "draft_expire_hours": 72,
+  "max_lessons": 30,
+  "retrieval_top_k": 6,
+  "daily_llm_call_limit": 500,
+  "saved_wait_assumption_hours": 24,
+  "briefing_hour": 9,
+  "dnd_start": "22:00",
+  "dnd_end": "07:00"
+}
+
+  반영 위치
+    1. `app/config.py` 의 `DEFAULT_SETTINGS` (기본값의 단일 원천 — 룰 1)
+    2. `docs/04-data-model.md §3` 의 기본값 표에서 ⚠️ 잠정값 표기를 제거하고 실측일자를 남긴다
+    3. `docs/05-api-contract.md §3` settings 허용 키 표의 기본값 열
+    4. `docs/08-demo-scenario.md §3` 기대 등급표를 판정 1 의 '제안값 적용 후 등급'과 대조한다
+       — 단 Q7·Q8·Q9 는 ④ 플래그 경로이므로 대조 대상이 아니다
+
+  `briefing_timezone` 은 존재하지 않는다 — 브리핑·DND 는 담당자 `users.timezone` 단일 원천이다.
+
+==============================================================================
+  보조 프로브 (DB 필요 — psql 로 직접 실행)
+==============================================================================
+
+  CREATE EXTENSION IF NOT EXISTS vector;
+  SELECT extversion FROM pg_extension WHERE extname='vector';   -- 0.8.0 이상? (hnsw.iterative_scan)
+  SELECT '[1,0,0]'::vector <=> '[1,0,0]'::vector AS same,       -- 기대 0 — <=> 는 "거리"다
+         '[1,0,0]'::vector <=> '[0,1,0]'::vector AS orthogonal; -- 기대 1
+
+  CREATE TABLE t(id int primary key, doc int, act bool);
+  CREATE UNIQUE INDEX ON t(doc) WHERE act;
+  INSERT INTO t VALUES (1,1,true),(2,1,false);
+  UPDATE t SET act = (id = 2) WHERE doc = 1;   -- 23505 나면 단일 UPDATE 스왑 금지 확정 (04 §7)
+  DROP TABLE t;
+
+  로컬 이미지와 **배포 DB 양쪽**에서 확인한다. Railway/Render 매니지드 Postgres가
+  `CREATE EXTENSION vector` 권한을 주는지 배포 당일이 아니라 지금 확인한다 (03 §6).
+

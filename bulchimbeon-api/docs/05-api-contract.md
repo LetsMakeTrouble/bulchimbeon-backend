@@ -136,11 +136,11 @@
 | `green_threshold` | int 0~100 | 80 | 🟢 하한 |
 | `yellow_threshold` | int 0~100 | 50 | 🟡 하한 |
 | `grounding_min` | int 0~100 | 60 | 문장 3개 이상일 때만 적용 |
-| `s_floor` | float 0~1 | 0.25 | 유사도 리스케일 하한 (⚠️ 캘리브레이션 전 잠정값) |
-| `s_ceil` | float 0~1 | 0.65 | 유사도 리스케일 상한 (⚠️ 잠정값) |
-| `similarity_floor` | float 0~1 | 0.25 | top-1 원시 유사도 미달 시 강제 🔴 `no_evidence` 기본값은 `s_floor`와 동일 |
-| `reuse_threshold` | float 0~1 | 0.92 | **원시 코사인** (리스케일 안 함, ⚠️ 잠정값) |
-| `similar_threshold` | float 0~1 | 0.85 | `similar_official_qa` 첨부 하한 (원시 코사인) (⚠️ 잠정값) |
+| `s_floor` | float 0~1 | 0.25 | 유사도 리스케일 하한 (M-1 실측 2026-08-07) |
+| `s_ceil` | float 0~1 | 0.679 | 유사도 리스케일 상한 (M-1 실측 2026-08-07) |
+| `similarity_floor` | float 0~1 | 0.423 | top-1 원시 유사도 미달 시 강제 🔴 `no_evidence`. **`s_floor` 파생이 아니라 독립 실측값**이다 (`04 §3`) |
+| `reuse_threshold` | float 0~1 | 0.925 | **원시 코사인** (리스케일 안 함, M-1 실측) |
+| `similar_threshold` | float 0~1 | 0.855 | `similar_official_qa` 첨부 하한 (원시 코사인, M-1 실측) |
 | `draft_expire_hours` | int | 72 | draft 만료 |
 | `max_lessons` | int | 30 | 초과 시 §10 `cleanup_suggestions[]` |
 | `retrieval_top_k` | int | 6 | 검색 top-k |

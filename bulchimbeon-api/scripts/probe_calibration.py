@@ -72,11 +72,13 @@ REUSE_MARGIN = 0.03
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 시드 코퍼스 — docs/08-demo-scenario.md §2 를 헤딩 단위로 손분할 (21 청크)
-#   api-spec 9 · refund-policy 5 · integration-guide 5 · meeting-notes 2
+# 시드 코퍼스 — docs/08-demo-scenario.md §2 를 헤딩 단위로 손분할 (22 청크)
+#   api-spec 10 · refund-policy 5 · integration-guide 5 · meeting-notes 2
+# ⚠️ 이 배열의 순서는 `_gen_user_prompt()` 가 인덱스로 참조한다. 청크를 삽입·삭제하면
+#    그쪽 `picks` 를 반드시 함께 갱신한다 (M-1 에서 Currencies 를 추가하며 한 번 밀렸다).
 # ─────────────────────────────────────────────────────────────────────────────
 SEED_CHUNKS: list[dict] = [
-    # ── seed/api-spec.md — Orders API Specification v2.1 (9청크) ──────────
+    # ── seed/api-spec.md — Orders API Specification v2.1 (10청크) ─────────
     {
         "doc": "api-spec.md",
         "heading": "Orders API Specification v2.1 > GET /v2/orders/{order_id}",
@@ -87,6 +89,19 @@ SEED_CHUNKS: list[dict] = [
             "- `status` (string): one of `pending`, `paid`, `shipped`, `delivered`, `cancelled`\n"
             "- `currency` (string): ISO 4217. KRW, USD, and JPY are supported.\n"
             "- `total_amount` (integer): amount in the smallest currency unit"
+        ),
+    },
+    {
+        "doc": "api-spec.md",
+        "heading": "Orders API Specification v2.1 > Currencies",
+        "text": (
+            "The API supports three settlement currencies: KRW, USD, and JPY, identified by their ISO 4217\n"
+            "codes. An order's currency is fixed when the order is created and cannot be changed afterwards.\n"
+            "Amounts are always expressed in the smallest unit of the currency — KRW and JPY have no minor\n"
+            "unit, so `total_amount` is a whole won or yen figure, while USD amounts are in cents. A project\n"
+            "may be configured to accept more than one currency, but every individual order carries exactly\n"
+            "one. Currency conversion is not performed by the platform; the buyer is charged in the currency\n"
+            "recorded on the order."
         ),
     },
     {
@@ -441,10 +456,11 @@ def _gen_user_prompt() -> str:
     `[QUESTION]` 을 한 번에 싣는다. 판정 3 의 지연이 실 ④ 를 대표하려면 이 규모를 맞춰야 한다
     (청크 3개 409자짜리 축소판으로는 25초 데드라인 판정이 성립하지 않는다).
     """
-    # rate limit 충돌 쌍(2 api-spec ↔ 19 meeting-notes)과 무관 청크(3)를 반드시 유지한다 —
-    # `conflict` / `conflict_chunk_ids` 를 실제로 채우는 장치다. 4·5·6 은 평균 길이대 청크.
-    picks = [SEED_CHUNKS[2], SEED_CHUNKS[19], SEED_CHUNKS[4],
-             SEED_CHUNKS[5], SEED_CHUNKS[6], SEED_CHUNKS[3]]
+    # rate limit 충돌 쌍(3 api-spec ↔ 20 meeting-notes)과 무관 청크(4)를 반드시 유지한다 —
+    # `conflict` / `conflict_chunk_ids` 를 실제로 채우는 장치다. 5·6·7 은 평균 길이대 청크.
+    # ⚠️ 인덱스는 M-1 의 Currencies 추가로 각각 +1 밀렸다 (SEED_CHUNKS 상단 주석 참조).
+    picks = [SEED_CHUNKS[3], SEED_CHUNKS[20], SEED_CHUNKS[5],
+             SEED_CHUNKS[6], SEED_CHUNKS[7], SEED_CHUNKS[4]]
     evidence = "\n".join(
         f"[ch-{i + 1}] doc_title={c['doc']} · version=1 · heading_path={c['heading']}\n{c['text']}"
         for i, c in enumerate(picks)

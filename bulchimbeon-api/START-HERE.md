@@ -25,7 +25,7 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 
 | # | 세션 | 프롬프트 | 컷 가능? |
 | --- | --- | --- | --- |
-| 0 | **M-1 캘리브레이션 게이트** | `@prompts/00-calibration.md 실행해줘` | ⛔ 불가 |
+| 0 | **M-1 캘리브레이션 게이트** — **✅ 완료 2026-08-07** | ~~`@prompts/00-calibration.md`~~ 산출값 `04 §3` 반영 완료 | ⛔ 불가 |
 | 1 | M0 스캐폴딩 | `@prompts/00-kickoff.md 실행해줘` | ⛔ 불가 |
 | 2 | M1 인증·프로젝트 | `@prompts/01-auth-projects.md 실행해줘` | ⛔ 불가 |
 | 3 | M2 문서 인제스트 | `@prompts/02-documents-ingest.md 실행해줘` | PDF/DOCX만 컷 |
@@ -42,19 +42,27 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 
 ---
 
-## 첫 세션 프롬프트 (그대로 복붙)
+## 다음 세션 프롬프트 (그대로 복붙)
+
+> ✅ **M-1 캘리브레이션 게이트는 2026-08-07에 완료됐다.** 산출 임계값 5종은 `04 §3`·`05 §3`·`08 §1`과
+> 표 밖 인용 7곳에 전부 반영됐고, 판정 표 원문은 `calibration-2026-08-07.txt`(임베딩·지연),
+> `calibration-2026-08-07-latency.txt`(지연 분포 n=8), `calibration-2026-08-07-sql.txt`(SQL 프로브)에 보존돼 있다.
+> 실측이 문서를 뒤집은 지점은 `04 §3`·`04 §7`·`06 §0`에 근거와 함께 기록했다.
 
 ```
-@prompts/00-calibration.md 이 프롬프트를 실행해줘.
+@prompts/00-kickoff.md 이 프롬프트를 실행해줘.
 
-이건 M-1 캘리브레이션 게이트야. M0 스캐폴딩보다 먼저 실행해야 하고 절대 건너뛸 수 없어.
-이유: 문서의 임계값 세트(s_floor 0.25 / s_ceil 0.65 / reuse_threshold 0.92 / similar_threshold 0.85)는
-ada-002 시대 기준이라 text-embedding-3-small에서 성립하지 않을 수 있는 잠정값이야.
-실측 없이 M3를 시작하면 잘못된 임계값 위에 테스트 7종을 작성하게 되고,
-FakeLLM 테스트를 전부 통과한 채로 M9 클라우드 데모에서 처음 터져.
+M-1 캘리브레이션은 이미 끝났어. docs/04 §3의 실측 확정값
+(s_floor 0.25 / s_ceil 0.679 / similarity_floor 0.423 / reuse_threshold 0.925 / similar_threshold 0.855)
+을 config.py의 DEFAULT_SETTINGS 한 곳에만 박고 시작해줘 — 다른 파일에 복사하지 않는다(룰 1).
 
-산출된 실측값을 docs/04 §3 · docs/05 §3 · docs/08 §1 설정값 표와
-02:30 · 02:95 · 02:98 · 02:101 · 06:63 · 06:96 · 06:109 의 인용 기본값까지 전부 반영하고,
+M-1에서 함께 확정된 것도 반영해줘:
+- LLM 호출은 responses.parse로 고정 (chat은 p90이 튀어서 데드라인을 못 지킨다, docs/06 §0)
+- reasoning_effort=minimal 지원 확인됨. temperature는 400이므로 절대 전달 금지
+- 데드라인은 등급별 분리: LLM_PIPELINE_DEADLINE_SECONDS=25 / LLM_PIPELINE_DEADLINE_RED_SECONDS=35
+- pgvector는 0.8.6 확인됨 (hnsw.iterative_scan 사용 가능)
+- 부분 UNIQUE 단일 UPDATE 스왑은 행 순서에 따라 통과하기도 한다 — 반드시 2문 절차 (docs/04 §7)
+
 프롬프트의 DoD 체크리스트를 하나씩 확인해줘.
 ```
 
@@ -76,3 +84,4 @@ FakeLLM 테스트를 전부 통과한 채로 M9 클라우드 데모에서 처음
 - `--workers 1` 고정. SSE 큐가 인메모리고 APScheduler가 워커마다 중복 발화한다.
 - strict Structured Outputs는 **기본값 있는 필드 금지**. `conflict_chunk_ids: []`가 400의 직접 원인.
 - 부분 UNIQUE는 DEFERRABLE 불가 — 활성 버전·담당자 스왑은 한 트랜잭션 안에서 **2문으로 순서를 지켜** 처리.
+  ⚠️ 단일 UPDATE는 **행 순서에 따라 통과하기도 한다**(M-1 실측). 항상 터지는 게 아니라서 테스트가 초록인 채로 운영에서 간헐 실패한다 — `04 §7`.

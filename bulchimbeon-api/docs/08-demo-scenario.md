@@ -14,9 +14,9 @@
 | 키 | 값 | 비고 |
 | --- | --- | --- |
 | `green_threshold` / `yellow_threshold` / `grounding_min` | 80 / 50 / 60 | 리스케일이 스케일 차이를 흡수하므로 모델이 바뀌어도 유지 |
-| `retrieval_top_k` | **6** | 8에서 하향. 확장된 시드가 21청크이므로 top-k가 코퍼스보다 커지는 no-op이 발생하지 않는다 |
-| `s_floor` / `s_ceil` | **0.25 / 0.65** | ⚠️ **캘리브레이션 전 잠정값.** M-1 게이트(`07`) 실측값으로 대체한 뒤 시연한다 |
-| `similarity_floor` | 0.25 | top-1 `sim_raw`가 이 값 미만이면 강제 🔴 `no_evidence` |
+| `retrieval_top_k` | **6** | 8에서 하향. 확장된 시드가 22청크이므로 top-k가 코퍼스보다 커지는 no-op이 발생하지 않는다 |
+| `s_floor` / `s_ceil` | **0.25 / 0.679** | M-1 게이트 실측 확정 (2026-08-07) |
+| `similarity_floor` | **0.423** | top-1 `sim_raw`가 이 값 미만이면 강제 🔴 `no_evidence`. 실측에서 Q8(0.4202)·Q9(0.3645)를 유사도만으로 차단한다 |
 | `briefing_hour` / `dnd_start` / `dnd_end` | 9 / 22:00 / 07:00 | ⏰ **담당자 Mike의 `users.timezone`(America/New_York) 기준**으로 판정된다. `settings`에 별도 타임존 키는 없다 |
 
 > ### ⏰ 시연 시각과 DND — 이제 무관하다
@@ -28,9 +28,9 @@
 ## 2. 시드 문서 (영어, `seed/` 폴더에 파일로 생성)
 
 > 청킹은 마크다운 헤딩 경로 우선 분할이므로 `##` 섹션 하나가 청크 하나가 된다.
-> **총 21청크** — `retrieval_top_k`(6)보다 충분히 크므로 검색이 "전부 반환"으로 퇴화하지 않는다.
+> **총 22청크** — `retrieval_top_k`(6)보다 충분히 크므로 검색이 "전부 반환"으로 퇴화하지 않는다.
 
-### seed/api-spec.md — "Orders API Specification v2.1" (9청크)
+### seed/api-spec.md — "Orders API Specification v2.1" (10청크)
 ```markdown
 # Orders API Specification v2.1
 
@@ -41,6 +41,15 @@ Returns a single order. Response fields:
 - `status` (string): one of `pending`, `paid`, `shipped`, `delivered`, `cancelled`
 - `currency` (string): ISO 4217. KRW, USD, and JPY are supported.
 - `total_amount` (integer): amount in the smallest currency unit
+
+## Currencies
+The API supports three settlement currencies: KRW, USD, and JPY, identified by their ISO 4217
+codes. An order's currency is fixed when the order is created and cannot be changed afterwards.
+Amounts are always expressed in the smallest unit of the currency — KRW and JPY have no minor
+unit, so `total_amount` is a whole won or yen figure, while USD amounts are in cents. A project
+may be configured to accept more than one currency, but every individual order carries exactly
+one. Currency conversion is not performed by the platform; the buyer is charged in the currency
+recorded on the order.
 
 ## Authentication
 All endpoints require a Bearer token issued by the Auth service.
@@ -220,7 +229,7 @@ reported by email within one hour.
 | --- | --- | --- | --- |
 | Q1 | 주문 조회 API 응답에 user_id 포함되나요? | 🟢 | api-spec `GET /v2/orders/{order_id}` |
 | Q2 | 액세스 토큰 만료 시간이 어떻게 되나요? | 🟢 | api-spec `Authentication` — 24시간 + 재인증 |
-| Q3 | 지원하는 통화가 뭐예요? | 🟢 | api-spec — KRW/USD/JPY |
+| Q3 | 지원하는 통화가 뭐예요? | 🟢 | api-spec `Currencies` — KRW/USD/JPY |
 | Q4 | 목록 조회 페이지네이션 방식 알려주세요 | 🟢 | api-spec `Pagination` — cursor 기반, max 100 |
 | Q5 | 웹훅 재시도 정책이 있나요? | 🟢~🟡 | meeting-notes `API and Rate Limits`만 근거 (단일 출처) |
 | Q6 | 배송비도 환불되나요? | 🟢 | refund-policy `Shipping Fees` — 불량품 제외 환불 불가 |
@@ -233,6 +242,25 @@ reported by email within one hour.
 | Q13 | 샌드박스에서 실제 결제가 발생하나요? | 🟢 | api-spec `Sandbox` — 실제 결제 없음, 테스트 카드만, 매주 일요일 리셋 |
 
 - Q11~Q13은 **확장된 시드 섹션을 근거로 하는 🟢 케이스**다. 검색이 6청크만 뽑는 상황에서 정답 청크가 실제로 top-k에 들어오는지 검증한다.
+
+> ### 📊 M-1 대조 결과 (2026-08-07) — 이 표는 갱신 대상이 아니라 대조 대상이다
+> 확정 임계값(`s_floor 0.25` / `s_ceil 0.679`)을 적용한 **검색 점수 S**와 위 기대값을 대조했다.
+> S는 매칭률 `min(S, G)`의 **상한**일 뿐이며, M-1 프로브는 검색 단계만 측정한다(G는 ④ 생성이 있어야 나온다).
+>
+> | 구분 | 질문 | S | 대조 |
+> | --- | --- | --- | --- |
+> | 일치 | Q2 88 · Q4 90 · Q6 100 · Q11 91 · Q13 91 | 🟢 | 기대 🟢 ✅ |
+> | 일치 | Q5 54 | 🟡 | 기대 🟢~🟡 ✅ |
+> | **불일치** | **Q1 65 · Q3 56 · Q12 66** | 🟡 | 기대 🟢 |
+> | 대조 제외 | Q7 100 · Q8 40 · Q9 27 | — | ④ `conflict`/`not_answerable` 플래그 + `similarity_floor` 소관 |
+> | 대조 제외 | Q10 37 | — | 재사용 경로(원시 코사인 0.9551 ≥ `reuse_threshold`) |
+>
+> **불일치 3건의 원인 — 검색 실패가 아니다.** Q1·Q3·Q12는 정답 청크를 정확히 top-1으로 잡았다
+> (`GET /v2/orders/{order_id}` · `Currencies` · `Idempotency`). 원시 유사도가 중간대(0.4891~0.5342)일 뿐이다.
+> **임계값으로는 올릴 수 없다**: 이 셋을 🟢에 넣으려면 `s_ceil`을 0.58 이하로 낮춰야 하는데,
+> 그러면 Q2·Q4·Q11·Q13이 전부 100으로 포화되어 80/50 3분기가 무의미해진다(리스케일은 단조).
+> **따라서 기대값을 바꾸지 않고, 최종 등급은 `min(S, G)`이므로 M3 실LLM 스모크에서 G와 함께 재확인한다.**
+> G가 높으면 매칭률은 S에 막혀 🟡이 되고, 이는 "근거는 찾았으나 확신이 중간"이라는 제품 의미상 정직한 결과다.
 - ⚠️ **Q10의 주 방어선은 문안이 아니라 LLM 동일성 게이트다.** 어휘 근접은 원시 코사인을 `reuse_threshold` 위로 올리는 **보조 수단**일 뿐이고, "정말 같은 질문인가"의 최종 판정은 ②의 2차 게이트(yes/no)가 한다(`06 §2`). 게이트가 `no`를 내면 재사용 대신 새 답변이 생성되고 `answer.reuse_missed` 이벤트가 남는다.
 - **Q7·Q8의 기대값은 시연 시각과 무관**하다(§1의 DND 규칙 — 강제 🔴 4종은 DND에서도 🔴 유지). ⚠️ **Q9는 예외다**: `no_evidence`로 잡히면 시각과 무관하지만, `low_confidence`로 떨어지고 발행 가능한 문장이 남으면 담당자 DND 시간대에 🟡로 강등된다(`02` 룰 6 · `06 §2` ⑥). 따라서 Q9만 시각 의존적일 수 있다.
 
@@ -254,7 +282,7 @@ reported by email within one hour.
 ## 5. seed.py 요구사항
 
 1. 유저 3명 → 프로젝트 생성(마이크=담당자) → 지수·민준 asker 참여
-2. guidelines 등록 → `seed/*.md` **4개 문서**(api-spec / refund-policy / integration-guide / meeting-notes) 업로드 → 인제스트 완료 대기(ready). **총 21청크 생성 확인**을 어서션으로 둔다 — 청크 수가 `retrieval_top_k`보다 적으면 검색이 no-op가 되므로 조용히 깨지는 실패 모드다.
+2. guidelines 등록 → `seed/*.md` **4개 문서**(api-spec / refund-policy / integration-guide / meeting-notes) 업로드 → 인제스트 완료 대기(ready). **총 22청크 생성 확인**을 어서션으로 둔다 — 청크 수가 `retrieval_top_k`보다 적으면 검색이 no-op가 되므로 조용히 깨지는 실패 모드다.
 3. `--with-history` 옵션: **질문 45~60건**(**🟢 기대 질문만 35건 이상**)을 실제 파이프라인으로 실행해 이력·지표를 채운 상태로 시작 (발표 직전용)
    - 구성: Q1~Q6 + Q11~Q13(총 9종)과 그 **패러프레이즈 변형**을 섞어 45~60건. 🟢 위주로 하되 Q7·Q8·Q9 계열도 몇 건 섞어 등급 분포를 만든다. 🟢이 단독으로 35건 이상이 되도록 배분하고, Q7·Q8·Q9 계열은 등급 분포 확인용 8~10건에 그친다.
    - 실행 후 일부 답변에 담당자 승인(`verified`)과 질문자 "맞았다"(`correct`) 피드백을 주입한다 — **`grade_accuracy`의 분자**가 여기서 나온다.

@@ -225,10 +225,10 @@ erDiagram
   "yellow_threshold": 50,
   "grounding_min": 60,
   "s_floor": 0.25,
-  "s_ceil": 0.65,
-  "similarity_floor": 0.25,
-  "reuse_threshold": 0.92,
-  "similar_threshold": 0.85,
+  "s_ceil": 0.679,
+  "similarity_floor": 0.423,
+  "reuse_threshold": 0.925,
+  "similar_threshold": 0.855,
   "draft_expire_hours": 72,
   "max_lessons": 30,
   "retrieval_top_k": 6,
@@ -243,9 +243,12 @@ erDiagram
 - **유사도 리스케일** — `s_floor`/`s_ceil`은 원시 코사인을 0~100 등급 스케일로 옮기는 변환의 양 끝점이다:
   `S = round(clamp((sim_raw - s_floor) / (s_ceil - s_floor), 0, 1) × 100)`.
   `text-embedding-3-small`의 코사인 분포(평균 ≈0.43)를 흡수하므로 `green_threshold`/`yellow_threshold`(80/50)는 그대로 유지된다.
-- `similarity_floor`: top-1 `sim_raw`가 이 값 미만이면 근거 없음으로 보고 **강제 🔴 `no_evidence`**. 기본값은 `s_floor`와 동일.
+- `similarity_floor`: top-1 `sim_raw`가 이 값 미만이면 근거 없음으로 보고 **강제 🔴 `no_evidence`**. M-1 실측 전까지는 `s_floor` 파생값이었으나, **판정 4에서 독립 값으로 확정됐다** — 무근거 질문(Q9 0.3645)이 🟢 대역 하단(Q5 0.4811)보다 낮아 유사도만으로 분리 가능함이 실측됐고, 두 값의 중간인 **0.423**을 채택했다. 이 값이 Q8(0.4202)·Q9(0.3645)를 유사도만으로 차단하면서 🟢 대역은 전부 통과시킨다.
 - `reuse_threshold` / `similar_threshold`는 **리스케일하지 않은 원시 코사인**에 적용한다. 재사용 답변은 `matching_rate: null`이라 화면에 %가 뜨지 않으므로 표기 모순이 없다.
-- ⚠️ `s_floor` · `s_ceil` · `reuse_threshold` · `similar_threshold`는 **캘리브레이션 전 잠정값**이다. M-1 게이트(`scripts/probe_calibration.py`) 실측 후 재설정한다.
+- 위 임계값 5종은 **M-1 게이트 실측 확정값**이다 (**실측 2026-08-07**). 판정 표 원문은 `calibration-2026-08-07.txt`(1차 시도는 `-r1-q3-mismatch.txt`)에 보존돼 있다.
+  - `s_ceil` **0.679** — 스크립트 제안(관측 상위 10% 지점) 그대로.
+  - `s_floor` **0.25** — 손 조정값이다. 스크립트 자동 제안은 `min(전체 관측) − 0.02`인데 그 최소값이 **강제 🔴 대상인 Q9(0.3645)**여서 0.344가 나왔고, 그 구간에서는 🟢 대역 하단(Q3 43·Q5 41)이 RED로 떨어졌다. 🟢 대역 최소(Q5 0.4811)가 🟡을 유지하는 상한은 `2×0.4811 − 0.679 = 0.283`이며, 여기서 마진 0.03을 뺀 값이다. 결과: 🟢 대역 54~100, 강제 🔴 대상 27~40, 간격 +14.
+  - ⚠️ **임계값으로 강제 🔴을 만들려 하지 말 것.** 리스케일은 원시 유사도에 단조이므로 Q3를 올리면 Q8·Q9도 반드시 함께 올라간다. 강제 🔴 4종은 `similarity_floor`와 ④의 `conflict`/`not_answerable` 플래그가 담당한다.
 - `daily_llm_call_limit`: 프로젝트 일일 LLM 호출 상한. 초과 시 강제 🔴 `quota_exceeded`. **env가 아닌 settings**에 둔다(룰 1 일관성).
 - `saved_wait_assumption_hours`: 절약 대기시간 지표(§5)의 가정치. 화면에 "가정치"로 표기된다.
 - **`briefing_timezone`은 두지 않는다.** 브리핑·DND 시각 판정의 단일 원천은 항상 현재 담당자(`projects.answerer_id`)의 `users.timezone`이며, 담당자 교체 시 자동으로 따라간다. `05 §8` 응답의 `timezone`은 여기서 나오는 **파생값**이다.
@@ -348,7 +351,20 @@ stateDiagram-v2
 >
 > **부분 UNIQUE 인덱스는 `DEFERRABLE`을 지원하지 않는다.** 제약 검사를 커밋 시점으로 미룰 수 없으므로,
 > "기존 행을 내리고 새 행을 올리는" 전환은 **한 트랜잭션 안에서 반드시 2문으로, 아래 순서대로** 수행한다.
-> 한 문장(단일 `UPDATE … CASE`)으로 스왑하려는 시도는 문장 중간 상태에서 제약을 위반하므로 **금지**한다.
+> 한 문장(단일 `UPDATE … CASE`)으로 스왑하려는 시도는 **금지**한다.
+>
+> ⚠️ **M-1 실측 (2026-08-07, PostgreSQL 16.14 / pgvector 0.8.6) — 단일 UPDATE는 "항상 실패"하지 않는다. 그래서 더 위험하다.**
+>
+> | 케이스 | 방향 | 결과 |
+> | --- | --- | --- |
+> | A | 활성 `id 1 → 2` (낮은→높은) | **성공** `UPDATE 2` |
+> | B | 활성 `id 2 → 1` (높은→낮은) | **`23505` duplicate key** |
+> | C | 10행 중 활성 `1 → 7` (낮은→높은) | **성공** `UPDATE 10` |
+>
+> 성패가 **행 처리 순서에 의존**한다. 기존 활성 행이 새 활성 행보다 먼저 처리되면 통과하고, 나중이면 터진다.
+> 즉 개발 중 우연히 A·C 방향만 테스트하면 **초록으로 통과한 뒤 운영에서 간헐 실패**한다 — 항상 실패한다면
+> 오히려 안전하다(즉시 발견되므로). 아래 2문 절차는 순서와 무관하게 항상 성공함이 같은 프로브에서 확인됐다.
+> 실측 원문: `calibration-2026-08-07-sql.txt`.
 >
 > **활성 버전 교체** (`document_versions`)
 > ```sql

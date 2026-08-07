@@ -8,9 +8,12 @@
 
 ## 작업
 
-1. **시드 파일 생성 — 확장된 4문서 세트 / 총 21청크** (`docs/08-demo-scenario.md §2`의 본문을 **그대로**)
-   - `seed/api-spec.md` (9청크) — 기존 `GET /v2/orders/{order_id}` · `Authentication` · `Rate Limiting` ·
-     `Pagination` + 신규 `Webhooks` · `Errors` · `Idempotency` · `Sandbox` · `Regions`
+1. **시드 파일 생성 — 확장된 4문서 세트 / 총 22청크** (`docs/08-demo-scenario.md §2`의 본문을 **그대로**)
+   - `seed/api-spec.md` (10청크) — 기존 `GET /v2/orders/{order_id}` · `Currencies` · `Authentication` ·
+     `Rate Limiting` · `Pagination` + 신규 `Webhooks` · `Errors` · `Idempotency` · `Sandbox` · `Regions`
+     (⚠️ `Currencies`는 **M-1 캘리브레이션에서 추가**됐다. Q3("지원하는 통화가 뭐예요?")가
+     `GET /v2/orders/{order_id}`의 다목적 필드 목록 대신 `Sandbox`를 top-1로 잡아 MISMATCH가 났고,
+     결정 1.7에 따라 임계값이 아니라 시드를 보강했다)
    - `seed/refund-policy.md` (5청크) — `Standard Refund Window` · `Shipping Fees` · `Digital Goods` ·
      `Partial Refunds` · `Disputes`
      (⚠️ **일본 조항은 여전히 없다** — 시나리오 B의 근거 부족 🔴 장치.
@@ -82,7 +85,7 @@
    - [ ] SSE 버퍼링 확인 (네이티브 `EventSourceResponse`가 `X-Accel-Buffering: no`를 내보내는지)
    - [ ] CORS에 프론트 도메인 등록
    - [ ] 일일 LLM 한도(`settings.daily_llm_call_limit`) 동작 · 토큰 마스킹 · 비밀값 로그 미출력
-   - [ ] 시드 후 `SELECT count(*) FROM chunks` **≥ 20** (`08 §2` 기준 21청크)
+   - [ ] 시드 후 `SELECT count(*) FROM chunks` **≥ 20** (`08 §2` 기준 22청크)
 
 ## 완료 기준
 

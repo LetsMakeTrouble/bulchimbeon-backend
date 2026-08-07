@@ -1,0 +1,66 @@
+=== 프로브 1: pgvector 버전 (0.8.0 이상이어야 hnsw.iterative_scan 사용 가능) ===
+CREATE EXTENSION
+ extversion 
+------------
+ 0.8.6
+(1 row)
+
+                                                              version                                                               
+------------------------------------------------------------------------------------------------------------------------------------
+ PostgreSQL 16.14 (Debian 16.14-1.pgdg12+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 12.2.0-14+deb12u1) 12.2.0, 64-bit
+(1 row)
+
+=== 프로브 2: <=> 는 거리인가? (기대 same=0, orthogonal=1) ===
+ same | orthogonal | similarity_orthogonal 
+------+------------+-----------------------
+    0 |          1 |                     0
+(1 row)
+
+=== 프로브 3: 부분 UNIQUE 단일 UPDATE 스왑 (23505 나야 정상) ===
+CREATE TABLE
+CREATE INDEX
+INSERT 0 2
+UPDATE 2
+--- 2문 순서 분할이면 성공하는가? (04 §7 스왑 절차) ---
+UPDATE 1
+UPDATE 1
+ id | doc | act 
+----+-----+-----
+  1 |   1 | f
+  2 |   1 | t
+(2 rows)
+
+DROP TABLE
+=== 프로브 3b: 단일 UPDATE 성공이 행 처리 순서에 의존하는가? ===
+CREATE TABLE
+CREATE INDEX
+--- 케이스 A: 활성=낮은 id(1) -> 높은 id(2) 로 스왑 (앞서 성공한 방향) ---
+INSERT 0 2
+UPDATE 2
+  case  | id | act 
+--------+----+-----
+ A 결과 |  1 | f
+ A 결과 |  2 | t
+(2 rows)
+
+DELETE 2
+--- 케이스 B: 활성=높은 id(2) -> 낮은 id(1) 로 스왑 (역방향) ---
+INSERT 0 2
+ERROR:  duplicate key value violates unique constraint "t_doc_idx"
+DETAIL:  Key (doc)=(1) already exists.
+  case  | id | act 
+--------+----+-----
+ B 결과 |  1 | f
+ B 결과 |  2 | t
+(2 rows)
+
+DELETE 2
+--- 케이스 C: 행이 많을 때 (10개 버전 중 활성 교체) ---
+INSERT 0 10
+UPDATE 10
+   case    | id 
+-----------+----
+ C 활성 id |  7
+(1 row)
+
+DROP TABLE

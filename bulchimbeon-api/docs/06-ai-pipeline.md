@@ -40,7 +40,22 @@ flowchart TD
 
 - **임베딩은 1회**다. ②에서 `content_en` 임베딩을 산출하고 ③에서 **그 벡터를 재사용**한다(질문은 동일하므로 다시 임베딩하지 않는다).
 - ② 2차 게이트는 재사용 **후보가 있을 때만** 발생하는 추가 1회다(+약 2초).
-- ⏱ **전체 지연 목표는 `LLM_REASONING_EFFORT=minimal` 기준으로 M-1 캘리브레이션 실측 후 확정한다.** 기존의 "20초 이내"는 추론 모델(GPT-5 계열) 도입 전 수치이므로 실측 전에는 목표치로 인용하지 않는다. 실측 결과가 `LLM_PIPELINE_DEADLINE_SECONDS`(25초)를 넘으면 데드라인 안전망(§6)이 발동한다.
+- ⏱ **전체 지연 목표는 M-1 캘리브레이션 실측으로 확정됐다 (2026-08-07, n=8 반복 측정).** `LLM_REASONING_EFFORT=minimal`은 **지원된다**(400 아님).
+
+  | 호출 방식 | 중앙 | p90 | 최대 | σ |
+  | --- | --- | --- | --- | --- |
+  | `responses.parse` minimal | 6.55s | 8.09s | 8.18s | **1.32** |
+  | `chat.completions` minimal | 5.40s | 10.90s | 17.31s | 4.24 |
+
+  **등급별 데드라인을 분리한다** — 단일 25초로는 🔴 경로가 성립하지 않는다:
+
+  | 경로 | LLM 호출 | `responses` 중앙 / p90 | 데드라인 |
+  | --- | --- | --- | --- |
+  | 🟢/🟡 (①번역 ④생성 ⑤검증) | 3회 | 19.7s / **24.3s** | **25초** (`LLM_PIPELINE_DEADLINE_SECONDS`) |
+  | 🔴 (①번역 ④생성 ⑤검증 ⑦구조화) | 4회 | 26.2s / 32.4s | **35초** (`LLM_PIPELINE_DEADLINE_RED_SECONDS`) |
+
+  ⚠️ 기존의 "20초 이내"는 추론 모델 도입 전 수치이며 **폐기**한다. `00 §5`의 등급 확정 시간 목표도 이 표를 따른다.
+  ⚠️ **호출 방식은 `responses.parse`로 고정한다.** `chat`이 중앙값은 빠르지만 σ=4.24로 튀어(최대 17.31s) **p90 기준 🟢/🟡 경로를 지키지 못한다**(32.7s). 데드라인 설계는 중앙값이 아니라 p90으로 한다. 실측 원문은 `calibration-2026-08-07-latency.txt`.
 
 ## 1. 인제스트 (문서 업로드 시, 비동기)
 
@@ -60,7 +75,7 @@ flowchart TD
 ### ② 재사용 검사 (임베딩 1회 + 벡터 검색 + 동일성 게이트)
 - `content_en` 임베딩 → `official_qas` 중 `status=active` 대상 검색. **이 벡터를 ③에서 재사용한다.**
 - 판정 기준은 **리스케일하지 않은 원시 코사인 `sim_raw`**다. S(리스케일 값)와 다른 축이므로 섞지 않는다 (룰 4).
-  ⚠️ `reuse_threshold(0.92)` · `similar_threshold(0.85)`는 **캘리브레이션 전 잠정값**이다. M-1 게이트 실측값으로 대체한다.
+  `reuse_threshold(0.925)` · `similar_threshold(0.855)`는 **M-1 게이트 실측 확정값**이다 (2026-08-07). 실측 Q8↔Q10 = 0.9551, 무관 질문쌍 최대 0.4764로 안전 여유 +0.4486이다.
 - **1차 통과** `sim_raw ≥ reuse_threshold`: 재사용 **후보**로만 본다. 이것만으로 재사용하지 않는다.
 - **2차 게이트 (LLM 동일성 확인, 1회)**: 후보 질문과 신규 질문을 함께 주고 *"이 두 질문은 같은 질문인가?"* 를 **yes/no로 1회** 묻는다. 단일 임계값에 재사용을 걸지 않기 위한 장치다.
   - `yes` → **검색·생성 전부 스킵.** `answer_ko`(확정 한국어 원문)를 **그대로** 발행(재번역 금지, D5). `source=reused`, `official_qa_id` 연결, `reuse_count++`, 이벤트 `answer.reused`.
@@ -93,7 +108,7 @@ SELECT id, content, meta,
 S = round(clamp((sim_raw - s_floor) / (s_ceil - s_floor), 0, 1) × 100)
 ```
 - `sim_raw`는 **top-1 청크의 원시 코사인 유사도**다. `answers.sim_raw`에 그대로 기록해 캘리브레이션 근거로 남긴다.
-- `s_floor(0.25)` / `s_ceil(0.65)`는 `projects.settings` 값이며 ⚠️ **캘리브레이션 전 잠정값**이다. 임베딩 모델마다 코사인 분포 중심이 다르므로(`text-embedding-3-small`은 평균 ≈0.43) 원시값을 그대로 100배 하면 🟢에 영원히 도달하지 못한다. 리스케일이 이 스케일 차이를 흡수하므로 **80/50 등급 임계값은 그대로 유지된다.**
+- `s_floor(0.25)` / `s_ceil(0.679)`는 `projects.settings` 값이며 **M-1 게이트 실측 확정값**이다 (2026-08-07, 도출 근거는 `04 §3`). 임베딩 모델마다 코사인 분포 중심이 다르므로(`text-embedding-3-small`은 평균 ≈0.43) 원시값을 그대로 100배 하면 🟢에 영원히 도달하지 못한다. 리스케일이 이 스케일 차이를 흡수하므로 **80/50 등급 임계값은 그대로 유지된다.**
 
 **HNSW post-filtering 대응 (pgvector 0.8.0 이상 필요)**
 ```sql
@@ -103,10 +118,13 @@ SET LOCAL hnsw.ef_search = 100;
 - 검색 트랜잭션에서 위 두 줄을 먼저 실행한다. HNSW는 인덱스 스캔 **이후** `WHERE`를 적용하므로(post-filtering), 활성 버전 필터가 걸리면 top-k가 조용히 0건이 될 수 있다.
 - **0건 처리 순서**: 결과 0건 → `iterative_scan`을 켠 상태로 **재조회 1회** → 그래도 0건일 때만 `no_evidence` 확정.
 - 로컬 이미지와 배포 DB 양쪽에서 `SELECT extversion FROM pg_extension WHERE extname='vector'`로 0.8.0 이상을 확인한다 (M-1 게이트 항목).
+  - ✅ **로컬 확인 완료 (2026-08-07)**: `pgvector/pgvector:pg16` 이미지에서 **0.8.6** / PostgreSQL 16.14. `iterative_scan` 사용 가능.
+    같은 프로브에서 `<=>`가 **거리**임도 실증했다 — `same=0`, `orthogonal=1`. 유사도는 반드시 `1 - (embedding <=> :q)`.
+  - ⏳ **배포 DB(Railway/Render)는 미확인.** 매니지드 Postgres가 `CREATE EXTENSION vector` 권한을 주는지, 주더라도 0.8.0 이상인지는 배포 계정 생성 후 즉시 확인한다 (`03 §6`).
 
 **강제 🔴 조건**
 - 재조회 후에도 결과 0건 → 강제 🔴 (`no_evidence`).
-- **top-1 `sim_raw < similarity_floor`(기본 0.25)** → 청크가 반환되었더라도 근거 없음으로 보고 강제 🔴 (`no_evidence`). 벡터 검색은 항상 "가장 가까운 무언가"를 돌려주므로 하한이 없으면 무관한 청크로 답을 만들게 된다.
+- **top-1 `sim_raw < similarity_floor`(기본 0.423, M-1 실측)** → 청크가 반환되었더라도 근거 없음으로 보고 강제 🔴 (`no_evidence`). 벡터 검색은 항상 "가장 가까운 무언가"를 돌려주므로 하한이 없으면 무관한 청크로 답을 만들게 된다.
 
 ### ④ 근거 기반 생성 (LLM 1회, Structured Outputs strict)
 
@@ -255,7 +273,7 @@ Rules:
 
 - **일일 호출 상한**: `settings.daily_llm_call_limit`(기본 500) — ⚠️ **env가 아니라 `projects.settings`**다(룰 1의 하드코딩 금지 원칙). 초과 시 질문 접수는 받되 강제 🔴 + `held_reason='quota_exceeded'`.
 - **타임아웃**: `LLM_TIMEOUT_SECONDS=45`, 재시도 1회. 15초는 추론 모델에 비현실적이다.
-- **파이프라인 데드라인**: `LLM_PIPELINE_DEADLINE_SECONDS=25`. 초과 시 **그 시점까지의 결과로 🟡 발행 + 카드 생성**(안전망). 결과가 아예 없으면 `status='failed'` + `reason='failed'` 카드 (D23).
+- **파이프라인 데드라인**: 🟢/🟡 경로 `LLM_PIPELINE_DEADLINE_SECONDS=25`, 🔴 경로 `LLM_PIPELINE_DEADLINE_RED_SECONDS=35` (M-1 실측 근거는 §0). 초과 시 **그 시점까지의 결과로 🟡 발행 + 카드 생성**(안전망). 결과가 아예 없으면 `status='failed'` + `reason='failed'` 카드 (D23).
 - ⛔ **금지 파라미터**: `temperature` / `top_p` / `presence_penalty` / `frequency_penalty` / `seed` — GPT-5 계열에 전달하면 **400**이다. 프로바이더 계층에서 **화이트리스트로 강제**하고 그 외 키는 드롭한다.
 - `max_tokens` → **`max_completion_tokens`**를 쓴다.
 - `LLM_REASONING_EFFORT=minimal` — 지연 예산 달성의 필수 조건. M-1에서 모델의 지원 여부와 실측 지연을 함께 확정한다.

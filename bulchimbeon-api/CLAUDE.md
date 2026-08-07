@@ -30,7 +30,7 @@ uv run python scripts/seed.py --reset              # 데모 시드
 
 1. **라우터는 얇게** — 요청 검증·권한 확인·서비스 호출만. 비즈니스 로직은 `app/services/`.
 2. **LLM 호출은 `app/services/llm/` 프로바이더 인터페이스 경유만.** 라우터·서비스에서 openai SDK 직접 import 금지. 테스트는 `FakeLLMProvider` 사용 — 실 API 호출하는 테스트 금지.
-3. **임계값(80/50/60/`s_floor`/`s_ceil`/`similarity_floor`/0.92/0.85/72h/30개/`daily_llm_call_limit` 등) 하드코딩 금지** — 반드시 `projects.settings`에서 로드 (기본값은 `config.py`의 DEFAULT_SETTINGS 한 곳).
+3. **임계값(80/50/60/`s_floor`/`s_ceil`/`similarity_floor`/`reuse_threshold`/`similar_threshold`/72h/30개/`daily_llm_call_limit` 등) 하드코딩 금지** — 반드시 `projects.settings`에서 로드 (기본값은 `config.py`의 DEFAULT_SETTINGS 한 곳).
 4. **모든 상태 변화는 `events` 테이블에 기록** — 지표·타임라인의 단일 원천.
 5. **권한은 서버가 강제** — 담당자 전용/질문자 전용 액션은 의존성(`require_role`)으로 403. 프론트 신뢰 금지.
 6. 답변 생성은 **근거 문서 내용만** 사용. 일반 상식 폴백 절대 금지 — 근거 없으면 🔴 보류가 정답이다.

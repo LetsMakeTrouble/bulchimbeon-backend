@@ -1,0 +1,93 @@
+[project]
+name = "bulchimbeon-api"
+version = "0.1.0"
+description = "불침번 — 비동기 Q&A 협업 서비스 백엔드"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # 03 §1 스택 표. 하한 핀이 붙은 두 개는 이유가 있으므로 낮추지 않는다.
+    # - fastapi>=0.135.0: 네이티브 SSE(fastapi.sse.EventSourceResponse) 사용 (03 §1)
+    # - python-jose>=3.4.0: CVE-2024-33663 / CVE-2024-33664 (03 §1)
+    "fastapi>=0.135.0",
+    "uvicorn[standard]",
+    "sqlalchemy[asyncio]",
+    "asyncpg",
+    "alembic",
+    "pydantic",
+    "pydantic-settings",
+    "pgvector",
+    "openai",
+    "apscheduler",
+    "python-jose[cryptography]>=3.4.0",
+    "pwdlib[argon2]",
+    "python-multipart",
+    "pypdf",
+    "python-docx",
+    "httpx",
+    "notion-client",
+    "cryptography",
+]
+
+# ⚠️ 아래 3종은 의도적으로 넣지 않는다 (00-kickoff 1번):
+#   sse-starlette  — FastAPI 네이티브 SSE가 X-Accel-Buffering·15초 ping을 처리한다 (03 §1)
+#   testcontainers — 테스트는 떠 있는 Postgres에 TEST_DATABASE_URL로 붙는다 (03 §5.3)
+#   aiosqlite      — 테스트도 pgvector가 필요한 실제 Postgres를 쓴다 (03 §5.3)
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [
+    # ⚠️ ruff 는 마크다운 안의 파이썬 코드블록도 포맷한다. docs/ 와 prompts/ 는 사양 문서이므로
+    #    `ruff format` 이 주석 정렬을 바꾸면 그게 곧 "문서를 조용히 고치기"가 된다.
+    "docs/",
+    "prompts/",
+    # M-1 게이트 산출 스크립트. 판정 결과는 calibration-*.txt 에 보존돼 있고 재실행만 하면 된다.
+    # 스캐폴딩 커밋에 1400줄 재포맷 diff 를 섞지 않는다.
+    "scripts/probe_calibration.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI 의존성 주입은 인자 기본값으로 호출하는 것이 정식 문법이다 — B008 의 대상이 아니다.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Header",
+    "fastapi.Body",
+    "fastapi.Form",
+    "fastapi.File",
+    "fastapi.Security",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 리비전 템플릿(script.py.mako)이 sa·Vector import 를 항상 넣는다 — 03 §5.4 ②.
+# 그 리비전에서 안 쓰더라도 지우면 안 되므로 미사용 import 검사만 끈다.
+"alembic/versions/*.py" = ["F401", "I001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# 엔진·커넥션이 세션 스코프 픽스처에서 만들어지므로 테스트도 같은 이벤트 루프에서 돌아야
+# asyncpg 커넥션이 루프를 넘나들지 않는다.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+markers = [
+    "slow: 마이그레이션 검증 등 느린 테스트 (03 §5.3 — CI에서 분리 실행)",
+]

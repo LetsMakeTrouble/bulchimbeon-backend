@@ -1,0 +1,143 @@
+"""앱 팩토리 — CORS, 전역 예외 핸들러, /health.
+
+라우터는 마일스톤마다 추가된다 (`03 §3`). 아직 없는 모듈은 미리 만들지 않는다.
+"""
+
+import logging
+
+from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from app import __version__
+from app.config import settings
+from app.core.errors import AppError, error_payload
+from app.database import get_db
+
+logger = logging.getLogger(__name__)
+
+# FastAPI 내부에서 raw HTTPException 이 올라올 때의 매핑.
+# 도메인 로직은 AppError 를 쓰므로 여기 걸리는 건 라우팅 404·메서드 405 같은 프레임워크 예외다.
+# `05 §1.5` — error.message 는 **개발자용 한국어 고정**이다. starlette 의 영문 detail 을
+# 그대로 흘리면 계약을 벗어나므로 한국어 문안으로 갈아끼운다(원문은 로그에만 남긴다).
+_HTTP_STATUS_TO_ERROR = {
+    400: ("VALIDATION_ERROR", "요청 형식이 올바르지 않습니다."),
+    401: ("UNAUTHORIZED", "인증이 필요합니다."),
+    403: ("FORBIDDEN_ROLE", "권한이 없습니다."),
+    404: ("NOT_FOUND", "대상을 찾을 수 없습니다."),
+    422: ("PIPELINE_FAILED", "요청을 처리할 수 없습니다."),
+}
+_FALLBACK_SERVER_ERROR = ("INTERNAL_ERROR", "서버 오류가 발생했습니다.")
+# 405 처럼 계약서에 코드가 없는 상태값. 임의로 코드를 신설하지 않고 400 계열로 떨어뜨린다.
+_FALLBACK_CLIENT_ERROR = ("VALIDATION_ERROR", "요청을 처리할 수 없습니다.")
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="불침번 API",
+        version=__version__,
+        description="시차가 큰 글로벌 팀을 위한 비동기 Q&A 협업 서비스",
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origin_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    _register_exception_handlers(app)
+    _register_health(app)
+    return app
+
+
+def _register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(AppError)
+    async def _app_error_handler(_: Request, exc: AppError) -> JSONResponse:
+        return JSONResponse(status_code=exc.status_code, content=exc.to_payload())
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        # 계약서는 요청 형식 오류를 400 VALIDATION_ERROR 로 정의한다 (`05 §1.4`).
+        # FastAPI 기본값(422)을 그대로 두면 422 PIPELINE_FAILED 와 의미가 겹친다.
+        #
+        # ⚠️ `exc.errors()` 를 응답에도 로그에도 그대로 싣지 않는다. 항목마다 제출된 원본 값이
+        #    `input` 에 들어 있어 `POST /auth/signup` 에서 **평문 비밀번호가 그대로 새어 나간다**
+        #    (`03 §7` 로그 유출 금지). `ctx` 에는 ValueError 객체가 들어와 직렬화도 실패한다.
+        #    게다가 `detail` 은 `05 §1.4` 의 error 객체에 없는 필드다 — 계약 위반이기도 하다.
+        safe_errors = [
+            {"type": error.get("type"), "loc": error.get("loc"), "msg": error.get("msg")}
+            for error in exc.errors()
+        ]
+        logger.warning(
+            "request validation failed on %s %s: %s", request.method, request.url.path, safe_errors
+        )
+        return JSONResponse(
+            status_code=400,
+            content=error_payload("VALIDATION_ERROR", "요청 형식이 올바르지 않습니다."),
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_exception_handler(
+        request: Request, exc: StarletteHTTPException
+    ) -> JSONResponse:
+        fallback = _FALLBACK_SERVER_ERROR if exc.status_code >= 500 else _FALLBACK_CLIENT_ERROR
+        code, message = _HTTP_STATUS_TO_ERROR.get(exc.status_code, fallback)
+        logger.info(
+            "http exception on %s %s -> %s (%s)",
+            request.method,
+            request.url.path,
+            exc.status_code,
+            exc.detail,
+        )
+        return JSONResponse(status_code=exc.status_code, content=error_payload(code, message))
+
+    @app.exception_handler(Exception)
+    async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        # 내부 사정을 응답에 싣지 않는다. 토큰·문서 본문이 섞여 나갈 수 있다 (`03 §7`).
+        logger.exception("unhandled error on %s %s", request.method, request.url.path)
+        return JSONResponse(
+            status_code=500,
+            content=error_payload("INTERNAL_ERROR", "서버 오류가 발생했습니다."),
+        )
+
+
+def _register_health(app: FastAPI) -> None:
+    @app.get("/health", tags=["health"])
+    async def health(db: AsyncSession = Depends(get_db)) -> JSONResponse:
+        """DB ping 포함 헬스체크 (`03 §5.1`).
+
+        ⚠️ **DB 가 죽어도 200 을 반환한다.** 상태는 본문의 `db` 필드로만 알린다.
+        실패 시 5xx 를 주면 배포 플랫폼(Railway/Render)의 헬스체크가 이를 기동 실패로 보고
+        `alembic upgrade head` 가 끝나기 전 첫 부팅을 죽인다 — 확장이 없는 DB 에서는
+        런타임 엔진이 커넥션조차 못 열어(`unknown type: public.vector`) 재시작 루프가 된다.
+        `00-kickoff:44` 과 `03 §5.1` 은 정상 응답만 규정하므로 실패 코드를 신설하지 않는다.
+
+        세션 생성은 커넥션을 열지 않으므로(첫 execute 에서 연다) 의존성 단계는 항상 통과하고,
+        실제 실패는 여기서 잡힌다.
+        """
+        db_status = "ok"
+        try:
+            await db.execute(text("SELECT 1"))
+        except Exception:
+            logger.exception("health check: database ping failed")
+            db_status = "error"
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "ok" if db_status == "ok" else "degraded",
+                "db": db_status,
+                "version": __version__,
+            },
+        )
+
+
+app = create_app()

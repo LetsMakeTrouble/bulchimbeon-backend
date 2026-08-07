@@ -1,0 +1,20 @@
+.venv/
+.git/
+.omc/
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+storage/
+tests/
+docs/
+prompts/
+calibration-*.txt
+
+# scripts/ 는 제외하지 않는다 — 03 §6 5번이 "배포 후 scripts/seed.py 1회 실행"을 지시하므로
+# 배포 이미지 안에 있어야 한다. M-1 프로브는 이미지에 불필요하므로 그것만 뺀다.
+scripts/probe_calibration.py
+scripts/__pycache__/

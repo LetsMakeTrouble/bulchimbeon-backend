@@ -1,0 +1,65 @@
+# 구현 레포는 리포지터리 루트가 아니라 bulchimbeon-api/ 다 (킷과 한 레포에 함께 추적).
+# GitHub Actions 는 워크플로를 레포 루트의 .github/workflows 에서만 찾으므로
+# 파일은 여기 두고 working-directory 로 구현 레포를 가리킨다.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      # 로컬·CI·배포 전부 pg18 로 통일한다 (03 §1). testcontainers 는 쓰지 않고
+      # 떠 있는 Postgres 에 TEST_DATABASE_URL 로 붙는다 (03 §5.3).
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: bulchimbeon
+          POSTGRES_PASSWORD: bulchimbeon
+          POSTGRES_DB: bulchimbeon
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bulchimbeon -d bulchimbeon"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    defaults:
+      run:
+        working-directory: bulchimbeon-api
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://bulchimbeon:bulchimbeon@localhost:5432/bulchimbeon
+      TEST_DATABASE_URL: postgresql+asyncpg://bulchimbeon:bulchimbeon@localhost:5432/bulchimbeon_test
+      STORAGE_DIR: ${{ github.workspace }}/bulchimbeon-api/storage
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.2"
+          enable-cache: true
+          cache-dependency-glob: bulchimbeon-api/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Test
+        run: uv run pytest -m "not slow"
+
+      # 빈 DB 에서 `alembic upgrade head` 가 통과하는지 (03 §5.3). 느려서 따로 돌린다.
+      - name: Migration check
+        run: uv run pytest -m slow

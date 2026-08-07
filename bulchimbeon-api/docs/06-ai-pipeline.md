@@ -118,9 +118,16 @@ SET LOCAL hnsw.ef_search = 100;
 - 검색 트랜잭션에서 위 두 줄을 먼저 실행한다. HNSW는 인덱스 스캔 **이후** `WHERE`를 적용하므로(post-filtering), 활성 버전 필터가 걸리면 top-k가 조용히 0건이 될 수 있다.
 - **0건 처리 순서**: 결과 0건 → `iterative_scan`을 켠 상태로 **재조회 1회** → 그래도 0건일 때만 `no_evidence` 확정.
 - 로컬 이미지와 배포 DB 양쪽에서 `SELECT extversion FROM pg_extension WHERE extname='vector'`로 0.8.0 이상을 확인한다 (M-1 게이트 항목).
-  - ✅ **로컬 확인 완료 (2026-08-07)**: `pgvector/pgvector:pg16` 이미지에서 **0.8.6** / PostgreSQL 16.14. `iterative_scan` 사용 가능.
-    같은 프로브에서 `<=>`가 **거리**임도 실증했다 — `same=0`, `orthogonal=1`. 유사도는 반드시 `1 - (embedding <=> :q)`.
-  - ⏳ **배포 DB(Railway/Render)는 미확인.** 매니지드 Postgres가 `CREATE EXTENSION vector` 권한을 주는지, 주더라도 0.8.0 이상인지는 배포 계정 생성 후 즉시 확인한다 (`03 §6`).
+  - ✅ **로컬·배포 양쪽 확인 완료 (2026-08-07)** — M-1 게이트 DoD 충족.
+
+    | 환경 | pgvector | PostgreSQL | `CREATE EXTENSION vector` | `iterative_scan` |
+    | --- | --- | --- | --- | --- |
+    | 로컬 `pgvector/pgvector:pg18` | 0.8.6 | 18.4 | ✅ | ✅ `relaxed_order` |
+    | 배포 Railway (TCP Proxy) | 0.8.6 | 18.4 | ✅ **권한 있음** | ✅ `relaxed_order` |
+
+    `<=>`가 **거리**임을 양쪽에서 실증했다 — `same=0`, `orthogonal=1`. 유사도는 반드시 `1 - (embedding <=> :q)`.
+    배포 DB에서 `vector(1536)` 컬럼 + HNSW 인덱스 생성까지 확인했다(M0 마이그레이션 예행). 원문: `calibration-2026-08-07-deploy-db.txt`.
+  - ⚠️ **Railway는 `DATABASE_PUBLIC_URL`이 기본으로 없다.** Postgres 서비스 → Settings → Networking에서 **TCP Proxy를 켜야** 생성된다. 기본 `DATABASE_URL`은 내부망(`postgres.railway.internal`) 전용이라 외부에서 붙지 않는다.
 
 **강제 🔴 조건**
 - 재조회 후에도 결과 0건 → 강제 🔴 (`no_evidence`).

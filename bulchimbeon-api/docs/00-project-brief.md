@@ -67,7 +67,7 @@
 | 1 | 구현 범위 | **백엔드 온리** (FastAPI API 서버) — 프론트는 별도 팀, `05-api-contract.md`가 전달물 |
 | 2 | 빌드 도구 | Claude Code (`CLAUDE.md` + `prompts/` 시퀀스) |
 | 3 | 프레임워크 | FastAPI + SQLAlchemy 2.0(async) + Alembic + Pydantic v2 |
-| 4 | DB / 벡터 | PostgreSQL 16 + **pgvector** (일반 데이터·임베딩 통합) |
+| 4 | DB / 벡터 | PostgreSQL **18** + **pgvector 0.8.6** (일반 데이터·임베딩 통합). M-1 실측으로 로컬·CI·배포를 pg18로 통일 (2026-08-07) |
 | 5 | LLM | **OpenAI 기본** — 생성·번역 `gpt-5-mini`, **근거 검증은 `LLM_MODEL_VERIFY`로 분리**(다른 모델 교체 가능 = 환각 방어 2겹), 임베딩 `text-embedding-3-small`. 프로바이더 추상화로 교체·추가 가능("+@") |
 | 6 | 실시간 | **SSE** — FastAPI 네이티브(`fastapi.sse`, 0.135.0+). 알림함·큐·답변 완료 이벤트 |
 | 7 | 인증 | **JWT 실구현** (access + refresh), 초대 코드 참여 |

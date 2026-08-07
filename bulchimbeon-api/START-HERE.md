@@ -60,7 +60,8 @@ M-1에서 함께 확정된 것도 반영해줘:
 - LLM 호출은 responses.parse로 고정 (chat은 p90이 튀어서 데드라인을 못 지킨다, docs/06 §0)
 - reasoning_effort=minimal 지원 확인됨. temperature는 400이므로 절대 전달 금지
 - 데드라인은 등급별 분리: LLM_PIPELINE_DEADLINE_SECONDS=25 / LLM_PIPELINE_DEADLINE_RED_SECONDS=35
-- pgvector는 0.8.6 확인됨 (hnsw.iterative_scan 사용 가능)
+- Postgres는 로컬·CI·배포 전부 pg18로 통일 (pgvector/pgvector:pg18, pgvector 0.8.6)
+  Railway 매니지드 DB가 18.4를 주고 CREATE EXTENSION vector 권한도 확인됐다
 - 부분 UNIQUE 단일 UPDATE 스왑은 행 순서에 따라 통과하기도 한다 — 반드시 2문 절차 (docs/04 §7)
 
 프롬프트의 DoD 체크리스트를 하나씩 확인해줘.

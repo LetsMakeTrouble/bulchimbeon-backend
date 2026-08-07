@@ -40,7 +40,7 @@ uv run --with openai python scripts/probe_calibration.py
 ### 3. 보조 SQL 프로브
 
 ```bash
-docker run --rm -d --name pgprobe -e POSTGRES_PASSWORD=probe -p 5433:5432 pgvector/pgvector:pg16
+docker run --rm -d --name pgprobe -e POSTGRES_PASSWORD=probe -p 5433:5432 pgvector/pgvector:pg18
 docker exec -i pgprobe psql -U postgres -f -
 ```
 

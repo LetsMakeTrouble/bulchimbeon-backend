@@ -9,7 +9,7 @@
 | 웹 프레임워크 | FastAPI **`>=0.135.0`** | async 전면 사용. 네이티브 SSE(`fastapi.sse`) 사용을 위한 하한 핀 |
 | ORM / 마이그레이션 | SQLAlchemy 2.0 (async) + asyncpg / Alembic | |
 | 스키마 | Pydantic v2 | 요청/응답/LLM 구조화 출력 모두 |
-| DB | PostgreSQL 16 + **pgvector** | 일반 데이터 + 임베딩 통합 |
+| DB | PostgreSQL 18 + **pgvector 0.8.6** | 일반 데이터 + 임베딩 통합. **로컬·CI·배포를 pg18로 통일**한다 — M-1에서 Railway 매니지드 Postgres가 18.4를 주는 것이 확인됐고, 배포가 진실이므로 거기에 맞춘다 (`06 §2` ③) |
 | LLM | OpenAI SDK — 생성·번역 `gpt-5-mini`(`LLM_MODEL_ANSWER`/`LLM_MODEL_TRANSLATE`), **근거 검증 `LLM_MODEL_VERIFY`(별도 env)**, 임베딩 `text-embedding-3-small`(1536차원) | 모델명은 전부 env 설정, 프로바이더 추상화로 교체 가능. 검증 모델을 생성 모델과 **분리 가능하게** 둔 것이 환각 방어 2겹의 핵심("자기평가 순환논리" 반박) |
 | 실시간 | **FastAPI 네이티브 SSE** — `fastapi.sse.EventSourceResponse` | **`sse-starlette` 의존성 제거.** 네이티브가 `X-Accel-Buffering: no` 헤더와 15초 ping을 자동 처리하므로 별도 래퍼가 필요 없다 (FastAPI 0.135.0+) |
 | 인증 | JWT — **`python-jose[cryptography]>=3.4.0`** + pwdlib[argon2] | access 30분 / refresh 14일. **3.4.0 미만은 CVE-2024-33663 / CVE-2024-33664** — 하한 핀 필수이며 대체 라이브러리 선택지를 두지 않는다 |
@@ -200,7 +200,7 @@ uv run python scripts/seed.py
 - 테스트는 **이미 떠 있는 Postgres에 붙는다** — `TEST_DATABASE_URL`(`…/bulchimbeon_test`). 개발 표준의 `docker compose up -d db` 컨테이너를 그대로 재사용한다.
 - 세션 스코프 픽스처에서 `CREATE EXTENSION IF NOT EXISTS vector` → `Base.metadata.create_all`.
 - **테스트별 격리는 트랜잭션 롤백**으로 한다(테스트마다 DROP/CREATE 금지 — 느리고 HNSW 인덱스 재생성 비용이 크다).
-- CI는 GitHub Actions `services: pgvector/pgvector:pg16`만 사용한다.
+- CI는 GitHub Actions `services: pgvector/pgvector:pg18`만 사용한다.
 - **마이그레이션 검증 테스트 1개만** `@pytest.mark.slow`로 분리한다(`alembic upgrade head`가 빈 DB에서 통과하는지).
 
 ### 5.4 ⚠️ Alembic + pgvector 함정 3종
@@ -213,9 +213,15 @@ uv run python scripts/seed.py
 
 1. GitHub 레포 연결 → Railway 프로젝트 생성
 2. PostgreSQL 추가 → `CREATE EXTENSION vector;` 실행
-   > ⚠️ **배포 전에 반드시 확인할 것**: Railway·Render의 **매니지드 Postgres가 `CREATE EXTENSION vector` 권한을 주는지**를 먼저 검증한다.
-   > 슈퍼유저 권한이 없으면 이 한 줄에서 막히고, 그때는 **pgvector 지원 이미지(`pgvector/pgvector:pg16`)를 직접 띄우거나 pgvector 애드온이 있는 DB로 갈아타야 한다** — 배포 당일에 발견하면 복구 시간이 없다.
-   > 성공하더라도 `SELECT extversion FROM pg_extension WHERE extname='vector'`로 **0.8.0 이상**인지 확인한다(`hnsw.iterative_scan` 필요, `04 §7`).
+   > ✅ **M-1에서 검증 완료 (2026-08-07).** Railway 매니지드 Postgres는 `CREATE EXTENSION vector` **권한을 준다.**
+   > 실측: **pgvector 0.8.6 / PostgreSQL 18.4**, `hnsw.iterative_scan='relaxed_order'` 설정 가능,
+   > `vector(1536)` 컬럼 + HNSW 인덱스 생성 가능. 재검증은 `bash scripts/probe_deploy_db.sh`.
+   >
+   > ⚠️ **`DATABASE_PUBLIC_URL`은 기본으로 없다.** Postgres 서비스 → **Settings → Networking → TCP Proxy**(포트 5432)를
+   > 켜야 생성된다. 기본 `DATABASE_URL`은 내부망(`postgres.railway.internal`) 전용이라 외부에서 붙지 않는다.
+   >
+   > 권한이 없는 제공자로 갈아탈 경우: **pgvector 지원 이미지(`pgvector/pgvector:pg18`)를 직접 띄우거나 pgvector 애드온이 있는 DB**로 간다.
+   > 어느 경우든 `SELECT extversion FROM pg_extension WHERE extname='vector'`로 **0.8.0 이상**을 확인한다(`hnsw.iterative_scan` 필요, `04 §7`).
 3. 환경변수 등록 (§4 전체, `APP_ENV=demo`). `STORAGE_DIR`는 컨테이너 내 **절대 경로**로.
 4. 시작 커맨드: **`uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1`** (배포 시 `alembic upgrade head` 선행)
    - **`--workers 1`은 선택이 아니다.** SSE 구독자 큐가 인메모리라 워커가 2개면 다른 워커에 붙은 클라이언트에게 이벤트가 가지 않고, APScheduler가 워커 수만큼 중복 발화한다 (원칙 5).

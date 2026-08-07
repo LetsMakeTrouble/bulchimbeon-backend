@@ -18,7 +18,7 @@
      FastAPI의 `>=0.135.0` 하한 핀은 이것 때문이며 낮추면 안 된다.
    - ⚠️ `python-jose` **3.4.0 미만은 CVE-2024-33663 / CVE-2024-33664**다. 하한 핀 필수이며 "또는 pyjwt" 같은 양자택일을 두지 않는다.
    - ⚠️ **`testcontainers`·`aiosqlite`를 넣지 않는다.** 테스트 인프라는 7번에서 확정한다.
-2. `docker-compose.yml` — `pgvector/pgvector:pg16` 이미지 DB + api 서비스, 볼륨·헬스체크 포함.
+2. `docker-compose.yml` — `pgvector/pgvector:pg18` 이미지 DB + api 서비스, 볼륨·헬스체크 포함.
    **개발 표준은 `db`만 컨테이너**이고 `api` 서비스는 배포 이미지 검증용이다 (`03 §5.1`).
 3. `Dockerfile`(uv 기반 멀티스테이지), `.env.example`(`03 §4` 그대로 — `TEST_DATABASE_URL`·`LLM_MODEL_VERIFY`·
    `LLM_REASONING_EFFORT`·`LLM_TIMEOUT_SECONDS`·`LLM_PIPELINE_DEADLINE_SECONDS` 포함), `.gitignore`,
@@ -49,7 +49,7 @@
      `Base.metadata.create_all`. **테스트별 격리는 트랜잭션 롤백**(테스트마다 DROP/CREATE 금지 —
      느리고 HNSW 인덱스 재생성 비용이 크다). httpx AsyncClient 픽스처 포함.
    - `tests/test_health.py`
-8. GitHub Actions CI (`.github/workflows/ci.yml`): ruff check + pytest, `services: pgvector/pgvector:pg16`만 사용.
+8. GitHub Actions CI (`.github/workflows/ci.yml`): ruff check + pytest, `services: pgvector/pgvector:pg18`만 사용.
    **마이그레이션 검증 테스트 1개만** `@pytest.mark.slow`로 분리한다(빈 DB에서 `alembic upgrade head` 통과 확인).
 9. git init + 첫 커밋 `chore(M0): scaffold`
 

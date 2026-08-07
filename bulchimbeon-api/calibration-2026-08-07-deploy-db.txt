@@ -1,0 +1,52 @@
+배포 DB 프로브 — 호스트: monorail.proxy.rlwy.net:43716
+
+=== 1. CREATE EXTENSION vector 권한이 있는가? ===
+CREATE EXTENSION
+=== 2. 버전이 0.8.0 이상인가? (hnsw.iterative_scan 전제) ===
+ pgvector_version 
+------------------
+ 0.8.6
+(1 row)
+
+                                                   server_version                                                   
+--------------------------------------------------------------------------------------------------------------------
+ PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+(1 row)
+
+=== 3. hnsw.iterative_scan 을 실제로 설정할 수 있는가? ===
+SET
+ hnsw.iterative_scan 
+---------------------
+ relaxed_order
+(1 row)
+
+=== 4. <=> 는 거리인가? (기대 same=0, orthogonal=1) ===
+ same | orthogonal 
+------+------------
+    0 |          1
+(1 row)
+
+=== 5. 부분 UNIQUE 스왑 — 로컬과 동일하게 순서 의존인가? ===
+CREATE TABLE
+CREATE INDEX
+DELETE 0
+INSERT 0 2
+--- 역방향(높은 id -> 낮은 id): 23505 나야 로컬과 일치 ---
+ERROR:  duplicate key value violates unique constraint "_probe_t_doc_idx"
+DETAIL:  Key (doc)=(1) already exists.
+DROP TABLE
+=== 6. vector(1536) 컬럼과 HNSW 인덱스를 만들 수 있는가? ===
+CREATE TABLE
+CREATE INDEX
+   indexname   
+---------------
+ _probe_v_pkey
+ _probe_v_hnsw
+(2 rows)
+
+DROP TABLE
+
+결과 해석
+  1 이 실패하면 -> 매니지드 DB 가 확장 생성을 막는다. 다른 제공자나 자체 호스팅이 필요하다 (03 §6).
+  2 가 0.8.0 미만 -> hnsw.iterative_scan 사용 불가. 04 §7 의 post-filtering 대안이 필요하다.
+  5 가 23505 -> 로컬과 동일. 2문 스왑 절차가 배포 환경에서도 필수임이 확인된다.

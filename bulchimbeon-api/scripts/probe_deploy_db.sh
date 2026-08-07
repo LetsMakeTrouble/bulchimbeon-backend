@@ -30,8 +30,9 @@ fi
 echo "배포 DB 프로브 — 호스트: $(printf '%s' "$DEPLOY_DATABASE_URL" | sed -E 's#^.*@([^/?]+).*#\1#')"
 echo
 
+# URL 은 -e 로만 넘기고 컨테이너 안에서 확장한다 (명령줄 인자로 주면 ps 에 노출된다).
 docker run --rm -i -e PGURL="$DEPLOY_DATABASE_URL" pgvector/pgvector:pg16 \
-  psql "$PGURL" -v ON_ERROR_STOP=0 <<'SQL'
+  sh -c 'exec psql "$PGURL" -v ON_ERROR_STOP=0' <<'SQL'
 \echo '=== 1. CREATE EXTENSION vector 권한이 있는가? ==='
 CREATE EXTENSION IF NOT EXISTS vector;
 

@@ -14,7 +14,9 @@ AI가 프로젝트 문서를 근거로 🟢즉답/🟡확인대기/🔴보류로
 
 ## 스택 · 명령어
 
-Python 3.12 + uv / FastAPI (네이티브 SSE) / SQLAlchemy 2.0 async + asyncpg / Alembic / PostgreSQL 16 + pgvector / OpenAI / APScheduler
+Python 3.12 + uv / FastAPI (네이티브 SSE) / SQLAlchemy 2.0 async + asyncpg / Alembic / PostgreSQL 18 + pgvector 0.8.6 / OpenAI / APScheduler
+
+> ⚠️ Postgres는 **로컬·CI·배포 전부 pg18**로 통일한다(`pgvector/pgvector:pg18`). M-1에서 Railway가 18.4를 주는 것이 확인됐다.
 
 ```bash
 uv sync                                            # 의존성 설치

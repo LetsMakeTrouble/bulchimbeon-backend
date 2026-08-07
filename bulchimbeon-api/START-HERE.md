@@ -26,7 +26,7 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 | # | 세션 | 프롬프트 | 컷 가능? |
 | --- | --- | --- | --- |
 | 0 | **M-1 캘리브레이션 게이트** — **✅ 완료 2026-08-07** | ~~`@prompts/00-calibration.md`~~ 산출값 `04 §3` 반영 완료 | ⛔ 불가 |
-| 1 | M0 스캐폴딩 | `@prompts/00-kickoff.md 실행해줘` | ⛔ 불가 |
+| 1 | M0 스캐폴딩 — **✅ 완료 2026-08-07** | ~~`@prompts/00-kickoff.md`~~ DoD 5/5, `chore(M0): scaffold` | ⛔ 불가 |
 | 2 | M1 인증·프로젝트 | `@prompts/01-auth-projects.md 실행해줘` | ⛔ 불가 |
 | 3 | M2 문서 인제스트 | `@prompts/02-documents-ingest.md 실행해줘` | PDF/DOCX만 컷 |
 | 4~5 | **M3 질문 파이프라인** ⭐ | `@prompts/03-question-pipeline.md 실행해줘` | ⛔ 불가 |
@@ -44,26 +44,30 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 
 ## 다음 세션 프롬프트 (그대로 복붙)
 
-> ✅ **M-1 캘리브레이션 게이트는 2026-08-07에 완료됐다.** 산출 임계값 5종은 `04 §3`·`05 §3`·`08 §1`과
-> 표 밖 인용 7곳에 전부 반영됐고, 판정 표 원문은 `calibration-2026-08-07.txt`(임베딩·지연),
-> `calibration-2026-08-07-latency.txt`(지연 분포 n=8), `calibration-2026-08-07-sql.txt`(SQL 프로브)에 보존돼 있다.
-> 실측이 문서를 뒤집은 지점은 `04 §3`·`04 §7`·`06 §0`에 근거와 함께 기록했다.
+> ✅ **M0 스캐폴딩은 2026-08-07에 완료됐다** (`chore(M0): scaffold`). DoD 5/5 실측 통과.
+> 빈 볼륨에서 `compose up -d db` → `alembic upgrade head` → `uvicorn --workers 1` → `/health` ok 재현 확인,
+> `pytest` 15 passed, `ruff check`·`ruff format --check` 통과. 배포 이미지 빌드·기동까지 선검증했다.
+>
+> **M1이 시작하자마자 해야 할 것** — `app/models/`를 만들면 **두 곳에 import를 추가**한다:
+> `alembic/env.py`(주석 자리표시자)와 `tests/conftest.py`의 `Base.metadata.create_all` 경로.
+> 빠뜨리면 `alembic revision --autogenerate`가 **에러 없이 빈 리비전**을 뱉고 테스트도 초록이다.
 
 ```
-@prompts/AUTORUN.md @prompts/00-kickoff.md
+@prompts/AUTORUN.md @prompts/01-auth-projects.md
 
-두 문서를 읽고 M0 스캐폴딩을 실행해줘.
+두 문서를 읽고 M1 인증·프로젝트를 실행해줘.
 
 AUTORUN.md가 실행 규약이다. 특히 §3 "반드시 질문해야 하는 상황"을 지켜줘 —
 사양이 갈리거나, 실측이 문서를 뒤집거나, 외부 계정·비가역 작업이 필요하거나,
 DoD가 안 닫히거나, 스코프가 애매하면 추측하지 말고 AskUserQuestion으로 물어봐.
 반대로 §4에 있는 것들(문서에 답이 있는 것, 관례적 판단)은 묻지 말고 그냥 진행해.
 
-M-1은 이미 끝났다. docs/04 §3의 실측 확정값을 config.py의 DEFAULT_SETTINGS
-한 곳에만 박고 시작해 — 다른 파일에 복사하지 않는다(룰 3).
+M0은 이미 끝났다. 임계값은 config.py의 DEFAULT_SETTINGS에만 있고 에러 코드는
+core/errors.py에 05 §1.4대로 들어 있다 — 새로 만들지 말고 그대로 쓴다(룰 3, §7).
+모델을 만들면 alembic/env.py와 tests/conftest.py 양쪽에 import를 추가해야 한다.
 
-M0 DoD를 하나씩 확인하고, 통과하면 커밋하고, START-HERE.md 세션표를 갱신한 뒤
-보고하고 멈춰줘. M1은 새 세션에서 이어간다.
+M1 DoD를 하나씩 확인하고, 통과하면 커밋하고, START-HERE.md 세션표를 갱신한 뒤
+보고하고 멈춰줘. M2는 새 세션에서 이어간다.
 ```
 
 > 이후 마일스톤도 같은 형태다 — `@prompts/AUTORUN.md @prompts/01-auth-projects.md` 처럼

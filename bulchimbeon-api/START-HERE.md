@@ -50,22 +50,24 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 > 실측이 문서를 뒤집은 지점은 `04 §3`·`04 §7`·`06 §0`에 근거와 함께 기록했다.
 
 ```
-@prompts/00-kickoff.md 이 프롬프트를 실행해줘.
+@prompts/AUTORUN.md @prompts/00-kickoff.md
 
-M-1 캘리브레이션은 이미 끝났어. docs/04 §3의 실측 확정값
-(s_floor 0.25 / s_ceil 0.679 / similarity_floor 0.423 / reuse_threshold 0.925 / similar_threshold 0.855)
-을 config.py의 DEFAULT_SETTINGS 한 곳에만 박고 시작해줘 — 다른 파일에 복사하지 않는다(룰 1).
+두 문서를 읽고 M0 스캐폴딩을 실행해줘.
 
-M-1에서 함께 확정된 것도 반영해줘:
-- LLM 호출은 responses.parse로 고정 (chat은 p90이 튀어서 데드라인을 못 지킨다, docs/06 §0)
-- reasoning_effort=minimal 지원 확인됨. temperature는 400이므로 절대 전달 금지
-- 데드라인은 등급별 분리: LLM_PIPELINE_DEADLINE_SECONDS=25 / LLM_PIPELINE_DEADLINE_RED_SECONDS=35
-- Postgres는 로컬·CI·배포 전부 pg18로 통일 (pgvector/pgvector:pg18, pgvector 0.8.6)
-  Railway 매니지드 DB가 18.4를 주고 CREATE EXTENSION vector 권한도 확인됐다
-- 부분 UNIQUE 단일 UPDATE 스왑은 행 순서에 따라 통과하기도 한다 — 반드시 2문 절차 (docs/04 §7)
+AUTORUN.md가 실행 규약이다. 특히 §3 "반드시 질문해야 하는 상황"을 지켜줘 —
+사양이 갈리거나, 실측이 문서를 뒤집거나, 외부 계정·비가역 작업이 필요하거나,
+DoD가 안 닫히거나, 스코프가 애매하면 추측하지 말고 AskUserQuestion으로 물어봐.
+반대로 §4에 있는 것들(문서에 답이 있는 것, 관례적 판단)은 묻지 말고 그냥 진행해.
 
-프롬프트의 DoD 체크리스트를 하나씩 확인해줘.
+M-1은 이미 끝났다. docs/04 §3의 실측 확정값을 config.py의 DEFAULT_SETTINGS
+한 곳에만 박고 시작해 — 다른 파일에 복사하지 않는다(룰 3).
+
+M0 DoD를 하나씩 확인하고, 통과하면 커밋하고, START-HERE.md 세션표를 갱신한 뒤
+보고하고 멈춰줘. M1은 새 세션에서 이어간다.
 ```
+
+> 이후 마일스톤도 같은 형태다 — `@prompts/AUTORUN.md @prompts/01-auth-projects.md` 처럼
+> **규약 + 해당 마일스톤 프롬프트**를 함께 넘긴다. AUTORUN은 매 세션 다시 읽혀야 한다.
 
 ---
 

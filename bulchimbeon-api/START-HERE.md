@@ -6,8 +6,16 @@
 ## 실행 전 1회
 
 ```bash
-export OPENAI_API_KEY="sk-..."
+# 최초 1회 — 키를 .env에 기록 (git 추적 제외됨)
+echo 'OPENAI_API_KEY=sk-...' > .env && chmod 600 .env
+
+# 매 세션 — .env 로드
+set -a; . ./.env; set +a
 ```
+
+> ⚠️ 키를 `~/.bashrc`에만 넣으면 **에이전트가 쓰는 non-interactive 셸에서는 로드되지 않는다.**
+> Ubuntu 기본 `.bashrc`는 상단(`case $- in *i*`)에서 non-interactive 셸을 즉시 `return` 시키기 때문이다.
+> 그래서 키의 원천은 `.env` 하나로 고정한다.
 
 M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 대체 불가하다. 키가 없으면 시작할 수 없다.
 

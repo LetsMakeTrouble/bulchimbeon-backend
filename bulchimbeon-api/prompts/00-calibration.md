@@ -14,7 +14,7 @@
 ### 1. 임베딩·LLM 프로브 실행
 
 ```bash
-export OPENAI_API_KEY="sk-..."
+set -a; . ./.env; set +a          # OPENAI_API_KEY 로드 (.env가 키의 단일 원천)
 uv run --with openai python scripts/probe_calibration.py
 ```
 

@@ -63,9 +63,7 @@
 
 ## ⚠️ 이 마일스톤에서 가장 자주 깨지는 것
 
-- **PowerShell 5.1에는 `&&`가 없다.** `docker compose up -d db && uv run alembic upgrade head`는 파서 에러다.
-  `cmd1; if ($?) { cmd2 }` 로 쓰거나 두 줄로 나눈다. README·문서의 명령어 블록도 전부 이 표기를 따른다.
-- **`STORAGE_DIR`는 절대 경로**로 둔다(`C:/dev/bulchimbeon/storage`). 상대 경로는 uvicorn 실행 위치·컨테이너
+- **`STORAGE_DIR`는 절대 경로**로 둔다(예: `/home/kancth03/bulchimbeon/bulchimbeon-api/storage`). 상대 경로는 uvicorn 실행 위치·컨테이너
   WORKDIR에 따라 다른 디렉터리를 가리켜 "업로드는 됐는데 파일이 없다"를 만든다.
 - **호스트 실행 모드와 컨테이너 실행 모드를 섞지 않는다.** 개발 표준은 `docker compose up -d db` + 호스트 uvicorn 하나다.
 - **`--workers 1`은 선택이 아니다.** SSE 구독자 큐가 인메모리이고 APScheduler가 프로세스마다 중복 발화한다.

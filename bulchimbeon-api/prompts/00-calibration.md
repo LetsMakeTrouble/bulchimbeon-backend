@@ -13,13 +13,12 @@
 
 ### 1. 임베딩·LLM 프로브 실행
 
-```powershell
-$env:OPENAI_API_KEY = "sk-..."
+```bash
+export OPENAI_API_KEY="sk-..."
 uv run --with openai python scripts/probe_calibration.py
 ```
 
 - 아직 `pyproject.toml`이 없으므로 `--with openai`가 필요하다. M0 이후에는 생략 가능.
-- 출력이 깨져 보이면 `chcp 65001`을 한 번 실행한 뒤 재실행한다.
 - 스크립트 상단 독스트링의 **사전 등록 판정 기준표를 먼저 읽는다.** 결과를 보고 기준을 바꾸지 않는다.
 
 ### 2. 결과 해석 — 판정 4종
@@ -40,7 +39,7 @@ uv run --with openai python scripts/probe_calibration.py
 
 ### 3. 보조 SQL 프로브
 
-```powershell
+```bash
 docker run --rm -d --name pgprobe -e POSTGRES_PASSWORD=probe -p 5433:5432 pgvector/pgvector:pg16
 docker exec -i pgprobe psql -U postgres -f -
 ```

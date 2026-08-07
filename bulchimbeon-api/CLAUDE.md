@@ -16,17 +16,15 @@ AI가 프로젝트 문서를 근거로 🟢즉답/🟡확인대기/🔴보류로
 
 Python 3.12 + uv / FastAPI (네이티브 SSE) / SQLAlchemy 2.0 async + asyncpg / Alembic / PostgreSQL 16 + pgvector / OpenAI / APScheduler
 
-```powershell
+```bash
 uv sync                                            # 의존성 설치
 docker compose up -d db                            # DB만 기동
 uv run alembic upgrade head                        # 마이그레이션
 uv run uvicorn app.main:app --reload --workers 1   # 개발 서버 (:8000)
 uv run pytest                                      # 테스트
-uv run ruff check .; if ($?) { uv run ruff format . }   # 린트·포맷
+uv run ruff check . && uv run ruff format .        # 린트·포맷
 uv run python scripts/seed.py --reset              # 데모 시드
 ```
-
-> ⚠️ **PowerShell 5.1에는 `&&`가 없다** — 파서 에러가 난다. 순차 실행은 `cmd1; if ($?) { cmd2 }` 또는 두 줄로 나눠 쓴다.
 
 ## 아키텍처 규칙 (위반 금지)
 

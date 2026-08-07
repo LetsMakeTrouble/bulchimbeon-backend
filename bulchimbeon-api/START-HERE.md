@@ -5,8 +5,8 @@
 
 ## 실행 전 1회
 
-```powershell
-$env:OPENAI_API_KEY = "sk-..."
+```bash
+export OPENAI_API_KEY="sk-..."
 ```
 
 M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 대체 불가하다. 키가 없으면 시작할 수 없다.

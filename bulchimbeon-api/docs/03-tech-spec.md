@@ -151,7 +151,7 @@ EMBEDDING_MODEL=text-embedding-3-small
 EMBEDDING_DIM=1536                  # 응답 차원 검증 + dimensions 파라미터용. 벡터 컬럼은 vector(1536) 리터럴 고정
 
 # Storage
-STORAGE_DIR=C:/dev/bulchimbeon/storage    # 절대 경로 권장 (Windows/컨테이너 혼선 방지)
+STORAGE_DIR=/home/kancth03/bulchimbeon/bulchimbeon-api/storage    # 절대 경로 필수 (호스트/컨테이너 혼선 방지)
 
 # Integrations (프로젝트별 토큰은 DB 암호화 저장, 여긴 암호화 키만)
 INTEGRATION_ENCRYPTION_KEY=change-me-32bytes
@@ -166,7 +166,7 @@ INTEGRATION_ENCRYPTION_KEY=change-me-32bytes
 
 ### 5.1 개발 표준 — DB만 컨테이너, 앱은 호스트
 
-```powershell
+```bash
 uv sync
 docker compose up -d db                                  # DB만 기동
 uv run alembic upgrade head
@@ -174,7 +174,7 @@ uv run uvicorn app.main:app --reload --workers 1 --port 8000
 
 # 테스트 / 린트
 uv run pytest
-uv run ruff check .; if ($?) { uv run ruff format --check . }
+uv run ruff check . && uv run ruff format --check .
 
 # 시드 데이터
 uv run python scripts/seed.py
@@ -184,11 +184,9 @@ uv run python scripts/seed.py
 - 헬스체크: `GET /health` → `{"status":"ok","db":"ok"}`
 - `docker compose up --build`(api까지 컨테이너로)는 **배포 이미지 검증용**이며 개발 루프에서는 쓰지 않는다 — §5.2 참조.
 
-### 5.2 ⚠️ Windows(PowerShell) 주의
+### 5.2 ⚠️ 실행 환경 주의
 
-> - **`&&`는 PowerShell 5.1에서 파서 에러**다(`토큰 '&&'은(는) 이 버전에서 올바른 문 구분 기호가 아닙니다`).
->   순차 실행은 **`cmd1; if ($?) { cmd2 }`** 로 쓰거나 두 줄로 나눈다. 문서·`CLAUDE.md`·README의 명령어 블록도 전부 이 표기를 따른다.
-> - **`STORAGE_DIR`는 절대 경로**로 지정한다(`C:/dev/bulchimbeon/storage`). 슬래시는 `/`로 통일하면 Windows·컨테이너 양쪽에서 그대로 먹는다.
+> - **`STORAGE_DIR`는 절대 경로**로 지정한다(예: `/home/kancth03/bulchimbeon/bulchimbeon-api/storage`). 상대 경로는 uvicorn 실행 위치·컨테이너 WORKDIR에 따라 다른 디렉터리를 가리킨다.
 > - **호스트 실행 모드와 컨테이너 실행 모드를 섞지 않는다.** 두 모드는 `DATABASE_URL` 호스트명(`localhost` vs `db`)과 `STORAGE_DIR` 경로가 서로 다르다.
 >   섞으면 "마이그레이션은 됐는데 앱이 빈 DB를 본다" / "업로드 파일이 사라진다"가 난다.
 >   **개발 표준은 §5.1 하나로 고정**한다: `docker compose up -d db` + 호스트 uvicorn.

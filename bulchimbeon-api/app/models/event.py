@@ -16,6 +16,14 @@ from app.models.base import CreatedAtMixin, UUIDPrimaryKeyMixin
 
 
 class Event(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """⚠️ 이 테이블이 `models/base.py` 의 `clock_timestamp()` 기본값에 가장 많이 기댄다.
+
+    파이프라인 한 번이 `question.graded` · `question.status_changed` · `answer.published` ·
+    `card.created` 를 **같은 트랜잭션에서** 적재하므로, `created_at` 이 트랜잭션 시작 시각이면
+    네 행이 전부 동률이 되어 `05 §13` 타임라인의 순서가 사라진다. 지표에도 직접 영향이
+    있다 — 카드 처리 시간(`card_handle_30s_rate`)은 `card.viewed` → 액션 이벤트의 간격이다.
+    """
+
     __tablename__ = "events"
     __table_args__ = (
         # `04 §7` — 프로젝트 타임라인·지표 조회가 이 인덱스를 탄다.

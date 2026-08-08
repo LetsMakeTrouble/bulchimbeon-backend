@@ -9,9 +9,12 @@ M2 가 `document.version_activated` 를 더한다.
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.event import Event
+from app.models.user import User
+from app.schemas.metrics import EventActor, EventItem, EventListResponse
 
 EVENT_MEMBER_JOINED = "member.joined"
 EVENT_ANSWERER_TRANSFERRED = "answerer.transferred"
@@ -59,9 +62,18 @@ EVENT_LESSON_APPROVED = "lesson.approved"
 EVENT_LESSON_DELETED = "lesson.deleted"
 
 ENTITY_QUESTION = "question"
+# ⚠️ **쓰지 마라.** 답변·카드·교훈·공식 Q&A 이벤트는 전부 `ENTITY_QUESTION` 스코프다 —
+#    `05 §13` 타임라인 조회가 `?entity_type=question&entity_id=q-9` 이고 "질문의 전체 여정이
+#    한 타임라인으로" 나와야 하기 때문이다. 답변에 붙이면 그 질문의 타임라인에서 사라진다.
+#    질문당 답변은 1행이므로(`04 §7`) 잃는 정보가 없고 답변 식별자는 payload 로 남긴다.
 ENTITY_ANSWER = "answer"
 ENTITY_DOCUMENT = "document"
 ENTITY_DOCUMENT_VERSION = "document_version"
+
+# `05 §13` 타임라인 기본 조회 건수. §1.2 페이지네이션 봉투(20)가 아니다 — 질문 하나의 여정은
+# 접수·등급·상태전이·카드·피드백·확정으로 10~15건이라 20 에서 잘리면 앞부분이 사라진다.
+DEFAULT_TIMELINE_LIMIT = 50
+MAX_TIMELINE_LIMIT = 100
 
 
 async def record_event(
@@ -85,3 +97,64 @@ async def record_event(
     )
     db.add(event)
     return event
+
+
+async def list_timeline(
+    db: AsyncSession,
+    *,
+    project_id: UUID,
+    entity_type: str | None = None,
+    entity_id: UUID | None = None,
+    limit: int = DEFAULT_TIMELINE_LIMIT,
+) -> EventListResponse:
+    """이력 타임라인 (`05 §13`) — `{items: [{type, actor, payload, created_at}]}`.
+
+    > ### 질문 단위 조회가 "질문의 전체 여정"이 되는 이유
+    > `?entity_type=question&entity_id=q-9` 하나로 답변·카드·교훈·공식 Q&A 이벤트가 전부
+    > 딸려 나온다. 조회에서 조인을 하기 때문이 아니라 **기록할 때부터 질문 스코프로 남겼기
+    > 때문**이다 (M3·M4·M6 의 규약, `ENTITY_ANSWER` 주석 참조). 식별자는 payload 에 있다.
+    >
+    > 예외는 문서 스코프 둘(`document.version_activated` · `answers.review_cascade`)이다 —
+    > 한 번의 연쇄가 여러 질문에 걸치므로 질문에 붙일 수 없다. 그 질문에서의 결과는
+    > `card.created`(reason=doc_update)로 남으므로 여정은 끊기지 않는다.
+
+    **최근 `limit` 건을 오래된 순으로** 돌려준다. 두 화면을 한 엔드포인트가 받기 때문이다:
+    질문 타임라인은 접수부터 확정까지 시간순으로 읽혀야 하고(그래서 오름차순), 프로젝트
+    전체 피드는 최근 활동이 보여야 한다(그래서 자르는 쪽은 최신부터).
+
+    조회는 `ix_events_project_created` `(project_id, created_at)` 를 탄다.
+
+    ⚠️ 같은 트랜잭션에서 나온 이벤트들의 순서는 `events.created_at` 의 기본값이
+    `clock_timestamp()` 라서 성립한다 — `now()` 였다면 전부 동률이라 순서가 없다
+    (`models/event.py`).
+    """
+    limit = max(1, min(limit, MAX_TIMELINE_LIMIT))
+
+    stmt = select(Event.id).where(Event.project_id == project_id)
+    if entity_type is not None:
+        stmt = stmt.where(Event.entity_type == entity_type)
+    if entity_id is not None:
+        stmt = stmt.where(Event.entity_id == entity_id)
+    recent_ids = stmt.order_by(Event.created_at.desc()).limit(limit).subquery()
+
+    rows = (
+        await db.execute(
+            select(Event, User.id, User.name)
+            .join(recent_ids, recent_ids.c.id == Event.id)
+            # actor_id 가 NULL 이면 system 이다 — outerjoin 이라야 그 행이 사라지지 않는다.
+            .outerjoin(User, User.id == Event.actor_id)
+            .order_by(Event.created_at.asc())
+        )
+    ).all()
+
+    return EventListResponse(
+        items=[
+            EventItem(
+                type=event.type,
+                actor=None if user_id is None else EventActor(id=user_id, name=name),
+                payload=event.payload,
+                created_at=event.created_at,
+            )
+            for event, user_id, name in rows
+        ]
+    )

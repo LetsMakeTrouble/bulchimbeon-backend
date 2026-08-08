@@ -336,11 +336,18 @@ async def load_card(db: AsyncSession, card_id: UUID) -> ReviewCard:
     return card
 
 
-async def get_detail(db: AsyncSession, card: ReviewCard) -> ReviewCardDetail:
+async def get_detail(
+    db: AsyncSession, card: ReviewCard, *, actor_id: UUID | None = None
+) -> ReviewCardDetail:
     """상세 — **최초 조회 시 `first_viewed_at` 기록 + `card.viewed`** (`05 §7`).
 
     이 부수 효과가 카드 처리 시간 지표(`05 §13`)의 시작점이다. 그래서 계약서가 프리페치를
     금지한다 — 목록에서 미리 부르면 "열지도 않은 카드"에 열람 시각이 찍힌다.
+
+    ⚠️ `actor_id` 는 **카드를 연 담당자**다. 빠뜨리면 `events.actor_id` 가 NULL 이 되는데
+    `05 §13` 타임라인에서 `actor: null` 은 **system**(스케줄러·파이프라인)을 뜻하므로,
+    사람이 한 행위가 시스템이 한 것처럼 표시된다 — 바로 다음 줄의 `card.edited` 에는 담당자가
+    찍혀 있어 한 타임라인 안에서 모순이 보인다. 지표에는 영향이 없다(존재 여부만 센다).
     """
     question = await db.get(Question, card.question_id)
     if question is None:  # FK 가 보장하지만 타입을 좁힌다.
@@ -355,6 +362,7 @@ async def get_detail(db: AsyncSession, card: ReviewCard) -> ReviewCardDetail:
             db,
             project_id=card.project_id,
             type=event_service.EVENT_CARD_VIEWED,
+            actor_id=actor_id,
             entity_type=event_service.ENTITY_QUESTION,
             entity_id=question.id,
             payload={"card_id": str(card.id), "reason": card.reason},
@@ -500,26 +508,6 @@ async def resolve_card(
         answer.state = ANSWER_STATE_REJECTED
     await db.flush()
 
-    official_qa_id: UUID | None = None
-    if action != ACTION_REJECT and answer is not None and answer.state == ANSWER_STATE_VERIFIED:
-        official_qa = await official_qa_service.incorporate(
-            db, question=question, answer=answer, project_id=project.id
-        )
-        official_qa_id = official_qa.id if official_qa is not None else None
-
-    # 교훈 후보 추출 (룰 7, `06 §3`) — **수정 확정에만** 붙는다. `answer-option` 은 본문이
-    # 선택지 텍스트일 뿐 처리는 `edit` 과 완전히 동일하므로(`05 §7.2`) 함께 태운다.
-    lesson_candidate_id: UUID | None = None
-    if action in _CORRECTING_ACTIONS and answer is not None:
-        lesson = await lesson_service.extract_candidate(
-            db,
-            project=project,
-            question=question,
-            answer=answer,
-            original_content_en=original_content_en,
-        )
-        lesson_candidate_id = lesson.id if lesson is not None else None
-
     if action in (ACTION_APPROVE, ACTION_EDIT, ACTION_ANSWER_OPTION):
         await _answer_question(db, question)
 
@@ -528,11 +516,18 @@ async def resolve_card(
     _mark_resolved(card, actor, action)
     await db.flush()
 
+    # ⚠️ **카드 액션 이벤트가 편입·교훈보다 먼저다** (`07 §완료 기준` 타임라인 순서:
+    #    `card.viewed → edited → verified`). 담당자의 확정이 원인이고 공식 Q&A 편입은 그
+    #    결과이므로, 편입을 먼저 기록하면 `05 §13` 타임라인이 "확정됐는데 그 다음에
+    #    수정했다"로 읽힌다. 같은 트랜잭션이라 `clock_timestamp()` 가 이 순서를 보존한다.
+    #
+    #    그 대가로 `official_qa_id` 가 이 payload 에서 빠진다 — 계약서가 요구하는 키가 아니고
+    #    (`04 §5` 는 `card.kept` 의 `bulk` 만 규정한다) 바로 뒤에 오는 `official_qa.created`
+    #    이벤트가 같은 식별자를 싣는다.
     event_payload: dict[str, object] = {
         "card_id": str(card.id),
         "reason": card.reason,
         "resolved_feedbacks": resolved_feedbacks,
-        "official_qa_id": str(official_qa_id) if official_qa_id else None,
         # `04 §5` — answer-option 은 `card.edited` 로 기록하되 선택 index 를 남긴다.
         "selected_option_index": selected.index if selected is not None else None,
         # 유지·반려 사유는 M5 알림(`answer.kept`/`answer.rejected`)의 본문이 된다.
@@ -551,6 +546,26 @@ async def resolve_card(
         entity_id=question.id,
         payload=event_payload,
     )
+
+    # 교훈 후보 추출 (룰 7, `06 §3`) — **수정 확정에만** 붙는다. `answer-option` 은 본문이
+    # 선택지 텍스트일 뿐 처리는 `edit` 과 완전히 동일하므로(`05 §7.2`) 함께 태운다.
+    lesson_candidate_id: UUID | None = None
+    if action in _CORRECTING_ACTIONS and answer is not None:
+        lesson = await lesson_service.extract_candidate(
+            db,
+            project=project,
+            question=question,
+            answer=answer,
+            original_content_en=original_content_en,
+        )
+        lesson_candidate_id = lesson.id if lesson is not None else None
+
+    official_qa_id: UUID | None = None
+    if action != ACTION_REJECT and answer is not None and answer.state == ANSWER_STATE_VERIFIED:
+        official_qa = await official_qa_service.incorporate(
+            db, question=question, answer=answer, project_id=project.id
+        )
+        official_qa_id = official_qa.id if official_qa is not None else None
 
     await _notify_resolution(
         db,
@@ -847,15 +862,15 @@ async def bulk_keep(
             _confirm(answer, actor)
             await db.flush()
 
-            if question is not None:
-                await official_qa_service.incorporate(
-                    db, question=question, answer=answer, project_id=project_id
-                )
-
         resolved_feedbacks += await resolve_feedbacks(db, card.answer_id)
         _mark_resolved(card, actor, ACTION_KEEP)
         await db.flush()
 
+        # 순서는 `resolve_card` 와 맞춰 둔다 — 카드 액션 이벤트가 먼저, 공식 Q&A 편입이
+        # 나중이다. **지금은 눈에 보이는 차이가 없다**: `doc_update` 카드는 이미 확정·편입된
+        # 답변에만 생기므로 여기의 `incorporate` 는 항상 restore 분기이고 이벤트를 남기지
+        # 않는다. 그래도 맞춰 두는 이유는, 같은 조작의 이력 순서가 호출한 엔드포인트
+        # (개별 `keep` vs `bulk-keep`)에 따라 갈리는 구조를 남기지 않기 위해서다.
         await event_service.record_event(
             db,
             project_id=project_id,
@@ -865,6 +880,11 @@ async def bulk_keep(
             entity_id=card.question_id,
             payload={"card_id": str(card.id), "bulk": True},
         )
+
+        if answer is not None and question is not None:
+            await official_qa_service.incorporate(
+                db, question=question, answer=answer, project_id=project_id
+            )
 
         # 묶음 액션이라도 통지는 **카드 하나씩**이다 — 질문자가 서로 다르다 (`04 §4`).
         # 응답만 건수로 줄이는 것이고(`05 §7.4`) 알림을 합치는 것은 아니다.

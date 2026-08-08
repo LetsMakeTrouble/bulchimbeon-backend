@@ -179,6 +179,23 @@ async def test_bulk_keep_resolves_the_whole_document_bundle(
         assert card.status == "resolved"
         assert card.resolution == "kept"
 
+        # 카드 액션이 원인이고 공식 Q&A 편입이 결과다 — `05 §13` 타임라인이 그 순서로 읽혀야
+        # 한다. 여기서 확인되는 건 앞선 `approve` 쪽이다: **`bulk-keep` 은 이미 편입된 Q&A 를
+        # 되살리는 경로**라(`official_qa_service.incorporate` 의 restore 분기) 새 이벤트를
+        # 남기지 않는다. 그래서 `card.kept` 뒤에는 `official_qa.created` 가 오지 않는다.
+        types = list(
+            await db_session.scalars(
+                select(Event.type)
+                .where(Event.entity_id == as_uuid(question_id))
+                .order_by(Event.created_at.asc())
+            )
+        )
+        assert types.index(event_service.EVENT_CARD_APPROVED) < types.index(
+            event_service.EVENT_OFFICIAL_QA_CREATED
+        ), types
+        assert types.count(event_service.EVENT_OFFICIAL_QA_CREATED) == 1, types
+        assert types[-1] == event_service.EVENT_CARD_KEPT, types
+
     kept = await db_session.scalars(
         select(Event).where(Event.type == event_service.EVENT_CARD_KEPT)
     )

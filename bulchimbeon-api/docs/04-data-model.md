@@ -350,6 +350,30 @@ stateDiagram-v2
 - `briefing_runs`: **UNIQUE `(project_id, run_date)`** — 브리핑 중복 발송 방지. `INSERT … ON CONFLICT DO NOTHING` 후 `rowcount == 1`일 때만 발송한다 (결정 1.11).
 - `project_members`: `(project_id) WHERE role='answerer' AND status='active'` 부분 UNIQUE — 담당자 1명 강제 (룰 9)
 
+> ### ⚠️ `created_at`/`updated_at` 기본값은 `clock_timestamp()`다 — `now()`가 아니다
+>
+> **M7 실측 (2026-08-08).** Postgres의 `now()`는 `transaction_timestamp()`이라 **한 트랜잭션 안에서 값이 고정**된다.
+> 요청 하나가 여러 행을 만들면 그 행들의 `created_at`이 **완전히 동일**해지고, `ORDER BY created_at`이 순서를
+> 만들지 못해 결과가 **물리적 행 배치에 따라 달라진다**.
+>
+> | 케이스 | `now()` | `clock_timestamp()` |
+> | --- | --- | --- |
+> | 한 트랜잭션에서 INSERT 3건 | 세 행이 **같은 시각** | 문장마다 전진 |
+> | `ORDER BY created_at` | 순서 없음(행 배치에 의존) | INSERT 순서 그대로 |
+>
+> 실제로 깨지는 곳:
+> - **§5 이벤트 타임라인** (`05 §13`) — 질문 파이프라인 한 번이 `question.graded` · `question.status_changed` ·
+>   `answer.published` · `card.created`를 같은 트랜잭션에서 적재한다. 전부 동률이면 "질문의 전체 여정"이
+>   조회마다 다른 순서로 나온다. **지표에도 직접 영향** — 카드 처리 시간(`05 §13` `card_handle_30s_rate`)은
+>   `card.viewed` → 액션 이벤트의 간격이다.
+> - `review_cards` — `05 §7` 큐의 "오래된 순", `card_status_for_question`의 "그 상태를 만든 카드",
+>   `open_card_for_answer`의 "가장 최근 카드"가 전부 `created_at` 하나로 정렬한다.
+>
+> ⚠️ **`updated_at`도 함께 바꾼다.** 하나만 바꾸면 방금 INSERT한 행에서 `updated_at < created_at`이 되어
+> 눈에 보이는 모순이 생긴다. 단조로운 시각이 필요 없는 컬럼도 규칙을 하나로 유지한다.
+> 구현은 `app/models/base.py`의 `ROW_TIMESTAMP` 하나이며, `alembic/env.py`가
+> `compare_server_default=True`라 모델과 DB의 기본값이 어긋나면 `alembic check`가 잡는다.
+
 > ### ⚠️ 부분 UNIQUE 인덱스 스왑 절차 (필독)
 >
 > **부분 UNIQUE 인덱스는 `DEFERRABLE`을 지원하지 않는다.** 제약 검사를 커밋 시점으로 미룰 수 없으므로,

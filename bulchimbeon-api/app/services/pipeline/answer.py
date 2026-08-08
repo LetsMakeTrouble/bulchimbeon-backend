@@ -670,7 +670,9 @@ async def _publish_reused(ctx: _Ctx, official_qa: OfficialQA, similarity: float)
             "similarity": similarity,
         },
     )
-    await _record_status_changed(ctx, previous, QUESTION_STATUS_ANSWERED)
+    # ⚠️ **등급이 먼저, 상태 전이가 나중**이다 (`07 §완료 기준` 타임라인 순서).
+    #    등급이 상태를 정하므로(🔴 이면 held, 아니면 answered) 이 순서라야 `05 §13` 타임라인이
+    #    인과 그대로 읽힌다. 같은 트랜잭션이라 `clock_timestamp()` 가 이 순서를 보존한다.
     await _record_graded(
         ctx,
         answer=answer,
@@ -686,6 +688,7 @@ async def _publish_reused(ctx: _Ctx, official_qa: OfficialQA, similarity: float)
         degraded=False,
         deadline_exceeded=False,
     )
+    await _record_status_changed(ctx, previous, QUESTION_STATUS_ANSWERED)
 
     # 재사용은 **카드를 만들지 않으므로**(D11) 담당자 알림도 없다. 질문자에게만 알린다.
     await notification_service.notify_answer_completed(
@@ -785,6 +788,26 @@ async def _publish_generated(
     question.status = QUESTION_STATUS_HELD if is_red else QUESTION_STATUS_ANSWERED
     await db.flush()
 
+    # ⚠️ **등급 → 발행 → 상태 전이** 순서다 (`07 §완료 기준` 타임라인). 등급이 원인이고
+    #    나머지가 결과다 — 🔴 이면 발행하지 않고 상태도 `held` 가 되므로, 등급을 나중에
+    #    적으면 `05 §13` 타임라인이 "발행했는데 그 다음에 등급을 매겼다"로 읽힌다.
+    #    같은 트랜잭션이라 `clock_timestamp()` 가 이 순서를 보존한다.
+    await _record_graded(
+        ctx,
+        answer=answer,
+        grade=grade,
+        matching_rate=matching_rate,
+        sim_raw=sim_raw,
+        search_score=search_score,
+        g_raw=g_raw,
+        g_final=g_final,
+        removed=removed,
+        source=ANSWER_SOURCE_GENERATED,
+        held_reason=held_reason,
+        degraded=degraded,
+        deadline_exceeded=deadline_exceeded,
+    )
+
     if not is_red:
         # 질문 스코프로 남긴다 — 이유는 `_publish_reused` 의 주석 참조.
         await event_service.record_event(
@@ -801,21 +824,6 @@ async def _publish_generated(
         )
 
     await _record_status_changed(ctx, previous, question.status)
-    await _record_graded(
-        ctx,
-        answer=answer,
-        grade=grade,
-        matching_rate=matching_rate,
-        sim_raw=sim_raw,
-        search_score=search_score,
-        g_raw=g_raw,
-        g_final=g_final,
-        removed=removed,
-        source=ANSWER_SOURCE_GENERATED,
-        held_reason=held_reason,
-        degraded=degraded,
-        deadline_exceeded=deadline_exceeded,
-    )
 
     # 확인 카드 — 🟢 도 만든다. 큐가 최종 안전망이기 때문이다 (룰 6). 다만 🟢 은 브리핑·알림
     # 대상에서 제외되고, "맞았다" 2건으로 `recommend_approve` 가 될 때 비로소 브리핑에

@@ -38,6 +38,9 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        # 온라인 경로와 같은 설정을 준다. 오프라인에서는 비교할 DB 가 없어 실효는 없지만,
+        # 두 경로의 설정이 갈리면 "어느 쪽에서 돌렸느냐"에 따라 결과가 달라 보인다.
+        compare_server_default=True,
     )
 
     with context.begin_transaction():
@@ -45,7 +48,14 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    # `compare_server_default=True` — 기본값 표현식의 드리프트까지 `alembic check` 가 잡는다.
+    # 끄면 모델이 `clock_timestamp()` 인데 DB 는 `now()` 인 상태가 **초록으로 지나간다**
+    # (M7 0008 이 정확히 그 종류의 리비전이다). 새 테이블을 `now()` 로 만들어도 마찬가지다.
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_server_default=True,
+    )
 
     with context.begin_transaction():
         context.run_migrations()

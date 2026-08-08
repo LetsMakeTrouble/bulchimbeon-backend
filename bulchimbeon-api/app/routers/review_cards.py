@@ -61,10 +61,16 @@ async def get_review_card(
 ) -> ReviewCardDetail:
     """카드 상세. **최초 조회 시 `first_viewed_at` 기록 + `card.viewed` 이벤트** (지표 시작점).
 
-    ⚠️ GET 이지만 부수 효과가 있어 커밋한다. 계약서가 "상세 호출은 담당자가 실제로 카드를
-    열었을 때 정확히 1회"라고 못박은 이유가 이것이다.
+    ⚠️ **프리페치 금지 (`05 §7`).** 이 호출이 카드 처리 시간 지표(`05 §13`
+    `card_handle_30s_rate`)의 시작점을 찍는다. 목록에서 호버 프리페치·백그라운드 선행 조회를
+    하면 **열지도 않은 카드에 열람 시각이 찍혀 지표의 분모가 오염되고, 그 지표는 통째로
+    무의미해진다.** 상세 호출은 담당자가 실제로 카드를 연 순간 **정확히 1회**여야 한다.
+    큐 목록 아이템(`05 §7`)에 렌더에 필요한 값이 전부 있으므로 미리 부를 이유가 없다.
+
+    ⚠️ GET 이지만 부수 효과가 있어 커밋한다. `first_viewed_at` 은 **최초 1회만** 기록되므로
+    같은 카드를 다시 열어도 시각은 바뀌지 않는다.
     """
-    detail = await review_card_service.get_detail(db, access.card)
+    detail = await review_card_service.get_detail(db, access.card, actor_id=access.member.user_id)
     await db.commit()
     return detail
 

@@ -33,7 +33,7 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 | 6 | **M4 확인 워크플로** ⭐ — **✅ 완료 2026-08-08** | ~~`@prompts/04-review-workflow.md`~~ DoD 통과, `feat(M4): review workflow and knowledge loop` | ⛔ 불가 |
 | 7 | M5 알림·SSE — **✅ 완료 2026-08-08** | ~~`@prompts/05-notifications-sse.md`~~ DoD 6/6, `feat(M5): notifications, sse, expiry sweeper` | 컷 없음(전 범위) |
 | 8 | M6 브리핑·교훈 — **✅ 완료 2026-08-08** | ~~`@prompts/06-briefing-lessons.md`~~ DoD 8/8, `feat(M6): briefing scheduler and lesson memory` | 컷 없음(전 범위) |
-| 9 | M7 지표 | `@prompts/07-metrics-events.md 실행해줘` | 컷 없음(4종+정확도) |
+| 9 | M7 지표 — **✅ 완료 2026-08-08** | ~~`@prompts/07-metrics-events.md`~~ DoD 7/7, `feat(M7): events timeline and metrics` | 컷 없음(4종+정확도) |
 | 10 | M8 외부 연동 | `@prompts/08-integrations.md 실행해줘` | 컷 없음 (AUTORUN §1) |
 | 11 | M9 시드 | `@prompts/09-seed-deploy.md 의 시드 부분` | ⛔ 시드는 불가 |
 | 12 | **클라우드 배포 + 리허설** | `@prompts/09-seed-deploy.md 의 배포·리허설 부분` | ⛔ 불가 |
@@ -57,89 +57,88 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 
 ## 다음 세션 프롬프트 (그대로 복붙)
 
-> ✅ **M6 브리핑·교훈은 2026-08-08에 완료됐다** (`feat(M6): briefing scheduler and lesson memory`).
-> `pytest` **356 passed**(slow 포함), `ruff check`·`ruff format --check` 통과,
-> 마이그레이션 head는 **0007**. `alembic check` = "No new upgrade operations detected".
-> `grep -rn "TODO(M6)" app/` → **0건**. 별도 리뷰 패스(`code-reviewer`+`verifier`) 통과.
+> ✅ **M7 지표·타임라인은 2026-08-08에 완료됐다** (`feat(M7): events timeline and metrics`).
+> `pytest` **389 passed**(slow 포함), `ruff check`·`ruff format --check` 통과,
+> 마이그레이션 head는 **0008**. `alembic check` = "No new upgrade operations detected".
+> `grep -rn "TODO(M7)" app/` → **0건**. 별도 리뷰 패스(`code-reviewer`+`verifier`) 통과.
 >
-> **M7이 그대로 물려받는 것** (다시 만들지 마라)
-> - ⭐ **`metrics_service.auto_answer_rate(db, project_id=, window_days=)` 가 이미 있다.**
->   `05 §13`의 `auto_answer_rate`는 이것을 **그대로** 쓴다 — 두 벌 만들면 브리핑
->   `stats_snapshot`과 대시보드가 다른 숫자를 보여 준다. `grade_counts()`가 등급 분포
->   `{green, yellow, red}`를 주므로 §13의 `{value, target, green, yellow, red}`가 바로 나온다.
-> - ⭐ **집계 원천은 `answers` 행이 아니라 `question.graded` 이벤트다** (룰 4 · `02 §10` ·
->   `04 §5`). M6가 처음에 `answers.grade`로 짰다가 리뷰에서 되돌렸다. **갈리는 지점이 실재한다**:
->   `reason='failed'` 카드에 `edit`하면 `_apply_edit`이 `grade=red`인 **새 Answer 행**을 만드는데
->   그 답변에는 `question.graded`가 없다. M7 작업 1(이벤트 감사)이 정확히 이런 구멍을 찾는 일이다.
-> - **`accuracy_service.for_grade(db, project_id=, grade=, language=, window_days=)`** 가
->   등급별 실측 정확도(D25)의 유일한 구현이다. `05 §13` `grade_accuracy[]`는 이것을 등급마다
->   불러 만들고, 아이템 스키마는 `schemas/question.GradeAccuracy` 다(§6과 §13이 같은 shape).
-> - **`lesson.candidate` / `lesson.approved` / `lesson.deleted` 이벤트는 이미 기록된다.**
->   `05 §13` timeseries의 `lessons_approved`가 여기 기댄다. `approve` 재호출 시 이벤트가
->   중복되지 않도록 상태 가드가 들어가 있다 — 없으면 학습 곡선이 부풀려진다.
-> - **`review_card_service.to_list_item(...)`** 은 이제 public 이다. `05 §7` 큐 아이템과
->   `05 §8` 브리핑 네 배열이 같은 함수를 쓴다.
-> - **`dnd.zone(timezone_name)` / `dnd.FALLBACK_TIMEZONE`** 이 public 이다. 깨진 타임존을
->   UTC로 떨어뜨리는 판정은 이 하나뿐이다 — 복제하면 DND와 브리핑이 다른 날짜를 본다.
-> - **`briefing_dispatch_service`** 는 `now=`를 주입받는다. 잡 등록은 `core/scheduler.py`
->   (만료 스위퍼 10분 · 좀비 회수 5분 · 브리핑 60분).
+> ### ⚠️ M7이 고친 것 — `created_at` 기본값이 `now()`가 아니라 `clock_timestamp()`다
+> M7 작업 1(이벤트 감사)이 찾은 건 **빠진 이벤트 타입이 아니라 시각이었다.** `04 §5`의 26종 중
+> `sync.run`(M8 몫)을 뺀 **25종이 전부 제자리에 기록되고 있었지만**, `now()`는
+> `transaction_timestamp()`라 한 요청이 만든 행들의 `created_at`이 **완전히 동일**했다.
+> 파이프라인 한 번이 남기는 이벤트 4건이 동률이라 `05 §13` 타임라인에 **순서가 없었다** —
+> 그런데도 조회는 성공하므로 우연히 맞는 순서로 초록이 지나갔다.
+> `app/models/base.py`의 `ROW_TIMESTAMP` 하나가 정본이고 전 테이블에 적용됐다(마이그 0008).
+> **새 모델은 `CreatedAtMixin`/`TimestampMixin`을 그대로 쓴다** — `server_default=func.now()`를
+> 직접 쓰면 같은 결함이 되살아난다. 이제 `alembic/env.py`가 `compare_server_default=True`라
+> 모델과 DB의 기본값이 어긋나면 `alembic check`가 잡는다.
 >
-> ⚠️ **이벤트·알림 타입·SSE 이벤트·`settings` 키는 전부 닫힌 집합이다.**
-> `tests/test_notification_contract.py`가 `04 §4`와 `05 §12.3`을 **정규식으로 파싱해** 막고,
-> `tests/test_config.py`가 `DEFAULT_SETTINGS` 16개를 고정한다. 새로 만들려면 문서를 먼저 고쳐야 한다.
+> **M8이 그대로 물려받는 것** (다시 만들지 마라)
+> - ⭐ **`sync.run`은 `04 §5` 이벤트 타입 중 유일하게 아직 기록되지 않은 하나다.** M8이 채운다.
+>   `event_service`에 상수부터 추가한다(타입 문자열을 인라인으로 쓰지 않는다).
+> - ⭐ **`sync.completed`/`sync.failed` 알림과 SSE `sync.completed`는 이미 닫힌 집합 안에 있다.**
+>   `tests/test_notification_contract.py`가 `04 §4`와 `05 §12.3`을 **정규식으로 파싱해** 막으므로
+>   문안·payload를 문서와 다르게 만들면 그 자리에서 터진다. SSE payload는
+>   `{integration_id, new_documents, new_versions}` 고정이다.
+> - **동기화가 만든 새 버전은 M2·M4 파이프라인을 그대로 탄다** — `document_service`의 인제스트·
+>   활성화와 `review_cascade_service.cascade_for_document`가 이미 룰 5를 구현한다. 별도 경로를
+>   만들면 "문서가 바뀌었는데 확정 답변이 재검토되지 않는" 구멍이 생긴다(`08 §3` 3번이 명시).
+> - **활성 버전 교체는 2문 절차**다(`04 §7`). 동기화가 버전을 올릴 때도 예외 없다 —
+>   단일 UPDATE는 행 순서에 따라 통과하기도 해서 테스트가 초록인 채 운영에서 간헐 실패한다.
+> - **지표·타임라인은 손대지 않는다.** `metrics_service`(비율 4종·시계열)와
+>   `accuracy_service.for_grade`(D25)가 정의의 유일한 위치이고, `event_service.list_timeline`이
+>   타임라인의 유일한 조회다. 새 이벤트를 기록하기만 하면 시계열·타임라인에 자동으로 실린다.
+> - **이벤트는 전부 질문 스코프**로 남긴다(`event_service.ENTITY_ANSWER` 주석). `sync.run`은
+>   질문이 아니라 연동 스코프이므로 `entity_type='integration'`이 자연스럽다 — 이건 `04 §5`가
+>   payload를 규정하지 않은 지점이라 **구현 전에 물어라**.
 >
-> ⚠️ **브리핑 중복 발송은 락이 아니라 제약이다** — `briefing_runs`의 `UNIQUE(project_id, run_date)`
-> + `ON CONFLICT DO NOTHING` → `rowcount == 1`일 때만 발송. `SELECT`로 "오늘 보냈나"를 먼저 보고
-> 분기하는 코드를 넣지 마라(TOCTOU).
+> ⚠️ **`INTEGRATION_ENCRYPTION_KEY`(Fernet)와 Notion·GitHub 토큰은 직접 만들 수 없다.**
+> AUTORUN §3.3 — 외부 계정·키가 필요한 지점이다. 시작하자마자 요청하고, 그동안 스텁 경로와
+> 모델·마이그레이션처럼 키가 필요 없는 작업을 먼저 한다.
 >
-> ⚠️ **보류 알림 flush는 `deliver_after`를 `NULL`로 만든다.** 그게 "SSE 발행 완료" 마커다.
-> 안 지우면 `deliver_after <= now()`가 영원히 참이라 매일 같은 알림에 SSE를 재발행한다.
-> 가시성은 `_deliverable`이 이미 처리하므로 NULL화는 순수하게 발행 마커다.
+> ⚠️ **`08-integrations.md` 상단의 "⛔ 기본 제외"는 적용하지 않는다** — AUTORUN §1이
+> "M8 실구현이 전부 범위 안"이라고 뒤집었다. 스텁 501로 끝내지 마라.
 >
-> ⚠️ **`content_hash` 정규화 구현은 `app/utils/hashing.py` 하나뿐이다** (D8).
-> 두 번째 구현이 생기면 "지운 교훈이 다시 올라온다"가 조용히 부활한다.
->
-> 🔧 **M6가 남긴 알려진 미해결 2건** (커밋했고, 급하지 않다):
-> - `dispatch_due_briefings`가 전 프로젝트를 **한 트랜잭션**에서 돌고 커밋은 잡이 한 번 한다.
->   한 프로젝트가 터지면 그 틱의 나머지도 롤백된다(다음 틱에 자가치유). 같은 함수에 N+1도 있다
->   (프로젝트마다 `db.get(User, ...)`). 프로젝트 수가 적어 지금은 문제가 아니다.
-> - DND 때문에 건너뛴 브리핑은 **다음 날 `run_date`로 합쳐진다** — 그날 몫의 `briefing.ready`가
->   따로 나가지 않는다. 밀린 알림은 그때 함께 flush되므로 유실은 없다.
->   (`briefing_dispatch_service.py`에 근거가 주석으로 남아 있다.)
+> 🔧 **M7이 남긴 알려진 미해결 2건** (커밋했고, 급하지 않다):
+> - `card_handle_30s_rate`는 `payload->>'card_id'`로 조인한다 — JSONB 안이라 인덱스를 타지
+>   않는다. 바깥 집합이 "창 안에 열람된 카드"로 좁혀져 있어 데모·운영 규모에서는 문제가 아니지만,
+>   프로젝트 하나의 이벤트가 수십만 건이 되면 `events(type, (payload->>'card_id'))`가 필요하다.
+> - `grade_accuracy[]`(D25)만 원천이 `answers` 행이고 나머지 지표는 전부 `events`다. 그래서
+>   `reason='failed'` 카드를 담당자가 직접 써서 확정한 답변이 🔴 분모·분자에 함께 잡힌다
+>   (자동응답률에서는 제외된다 — `question.graded`가 없으므로). D25의 "해당 등급 전체 발행 수"를
+>   문자 그대로 따른 결과이며, 바꾸려면 D25를 먼저 고쳐야 한다.
 
 ```
-@prompts/AUTORUN.md @prompts/07-metrics-events.md
+@prompts/AUTORUN.md @prompts/08-integrations.md
 
-두 문서를 읽고 M7 이력 타임라인·지표를 실행해줘.
+두 문서를 읽고 M8 외부 연동(Notion·GitHub)을 실행해줘.
 
 AUTORUN.md가 실행 규약이다. 특히 §3 "반드시 질문해야 하는 상황"을 지켜줘 —
 사양이 갈리거나, 실측이 문서를 뒤집거나, DoD가 안 닫히거나, 스코프가 애매하면
 추측하지 말고 AskUserQuestion으로 물어봐. 반대로 §4에 있는 것들(문서에 답이
 있는 것, 관례적 판단)은 묻지 말고 그냥 진행해.
 
-⚠️ 07-metrics-events.md 상단의 ✂️ 컷라인은 **적용하지 않는다.** 데드라인이
-없으므로 지표 4종 + 등급별 정확도를 전부 구현한다 (AUTORUN §1).
+⚠️ 08-integrations.md 상단의 "⛔ 기본 제외"와 스텁 501 경로는 **적용하지 않는다.**
+데드라인이 없으므로 GitHub·Notion 동기화를 실제로 구현한다 (AUTORUN §1).
 
-M0~M6은 끝났다. 마이그레이션 head는 0007, pytest 356 passed다.
-M6이 남겨 둔 접점 (다시 만들지 마라):
-- auto_answer_rate 는 metrics_service 에 이미 있다. §13 은 그것을 그대로 쓴다.
-  grade_counts() 가 {green, yellow, red} 를 준다.
-- 집계 원천은 answers 행이 아니라 question.graded 이벤트다 (룰 4).
-  M6 가 answers 로 짰다가 리뷰에서 되돌렸으니 다시 되돌리지 마라.
-- grade_accuracy[] 는 accuracy_service.for_grade 를 등급마다 부른다.
-- lesson.candidate/approved/deleted 이벤트는 이미 기록된다(시계열 학습 곡선용).
+M0~M7은 끝났다. 마이그레이션 head는 0008, pytest 389 passed다.
+M7이 남겨 둔 접점 (다시 만들지 마라):
+- sync.run 은 04 §5 이벤트 타입 중 아직 기록되지 않은 유일한 하나다. M8 이 채운다.
+- 동기화가 만든 새 버전은 M2 인제스트 + M4 재검토 연쇄를 그대로 탄다.
+  별도 경로를 만들면 룰 5(문서 갱신 시 확정 답변 재검토)가 조용히 깨진다.
+- created_at 기본값은 clock_timestamp() 다. 새 모델은 CreatedAtMixin/TimestampMixin
+  을 그대로 쓴다 — func.now() 를 직접 쓰면 M7 이 고친 결함이 되살아난다.
+- 지표·타임라인은 손대지 마라. 이벤트를 기록하기만 하면 자동으로 실린다.
 
-⚠️ 작업 1(이벤트 기록 감사)이 이 마일스톤에서 제일 중요하다. 이벤트가 비면
-   지표를 나중에 되살릴 수 없다 — 과거 데이터는 소급 생성되지 않는다.
-   실제 구멍 하나를 M6 이 이미 찾아 뒀다: reason='failed' 카드를 edit 하면
-   grade=red 인 새 Answer 행이 생기는데 question.graded 이벤트가 없다.
-⚠️ requestion_instant_rate 의 분모는 reused + reuse_missed 다 (D26).
-   reuse_missed 를 빼면 재사용 1건만 일어나도 100% 가 되어 실패를 은폐한다.
-⚠️ grade_accuracy 는 표본 30 미만이면 값 대신 sufficient:false + message 다.
-   데모 규모에서 🟡·🔴 이 "표본 부족"으로 뜨는 건 버그가 아니라 D25 의 의도다.
+⚠️ INTEGRATION_ENCRYPTION_KEY(Fernet)와 Notion·GitHub 토큰은 네가 만들 수 없다.
+   AUTORUN §3.3 이다 — 시작하자마자 요청하고, 기다리는 동안 키가 필요 없는
+   모델·마이그레이션·스키마부터 해라.
+⚠️ 토큰이 DB 에 평문으로 저장되지 않는 것을 테스트로 확인한다 (완료 기준).
+⚠️ 알림 타입·SSE 이벤트는 닫힌 집합이다. tests/test_notification_contract.py 가
+   04 §4 와 05 §12.3 을 정규식으로 파싱해 막는다.
 
-M7 DoD를 하나씩 확인하고, 통과하면 커밋하고, START-HERE.md 세션표를 갱신한 뒤
-보고하고 멈춰줘. 다음은 M8 외부 연동이다(새 세션).
+M8 DoD를 하나씩 확인하고, 통과하면 커밋하고, START-HERE.md 세션표를 갱신한 뒤
+보고하고 멈춰줘. 다음은 M9 시드다(새 세션).
 ```
 
 > 이후 마일스톤도 같은 형태다 — `@prompts/AUTORUN.md @prompts/01-auth-projects.md` 처럼
@@ -165,3 +164,6 @@ M7 DoD를 하나씩 확인하고, 통과하면 커밋하고, START-HERE.md 세�
 - strict Structured Outputs는 **기본값 있는 필드 금지**. `conflict_chunk_ids: []`가 400의 직접 원인.
 - 부분 UNIQUE는 DEFERRABLE 불가 — 활성 버전·담당자 스왑은 한 트랜잭션 안에서 **2문으로 순서를 지켜** 처리.
   ⚠️ 단일 UPDATE는 **행 순서에 따라 통과하기도 한다**(M-1 실측). 항상 터지는 게 아니라서 테스트가 초록인 채로 운영에서 간헐 실패한다 — `04 §7`.
+- **`created_at` 기본값은 `clock_timestamp()`다. `now()`를 쓰지 마라**(M7 실측). `now()`는 트랜잭션 시작 시각이라
+  한 요청이 만든 행들이 **전부 같은 시각**이 되고 `ORDER BY created_at`이 순서를 못 만든다. 타임라인·큐 정렬이
+  물리적 행 배치에 따라 달라지는데, **틀린 순서로도 조회는 성공**해서 우연히 초록으로 지나간다 — `04 §7`.

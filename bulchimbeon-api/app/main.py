@@ -26,6 +26,7 @@ from app.routers import (
     briefing,
     documents,
     lessons,
+    metrics,
     notifications,
     official_qas,
     projects,
@@ -112,6 +113,7 @@ def create_app() -> FastAPI:
     app.include_router(lessons.router, prefix=API_V1_PREFIX)
     app.include_router(notifications.router, prefix=API_V1_PREFIX)
     app.include_router(briefing.router, prefix=API_V1_PREFIX)
+    app.include_router(metrics.router, prefix=API_V1_PREFIX)
     app.include_router(sse.router, prefix=API_V1_PREFIX)
     return app
 

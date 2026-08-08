@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # `05 §12.3` 이벤트 목록. 계약서에 없는 이벤트명을 새로 만들지 않는다.
 SSE_DOCUMENT_INGESTED = "document.ingested"
+SSE_ANSWER_COMPLETED = "answer.completed"
 
 
 async def publish(*, project_id: UUID, event: str, data: dict[str, Any]) -> None:
@@ -44,6 +45,28 @@ async def publish_document_ingested(
         data={
             "document_id": str(document_id),
             "version_id": str(version_id),
+            "status": status,
+        },
+    )
+
+
+async def publish_answer_completed(
+    *, project_id: UUID, question_id: UUID, grade: str | None, status: str
+) -> None:
+    """`05 §12.3` — `answer.completed` `{question_id, grade, status}` (수신자: 질문자).
+
+    🔴 보류(`status='held'`)와 파이프라인 실패(`status='failed'`)에도 **발행한다** —
+    알리지 않으면 프론트가 `processing` 상태로 영원히 폴링한다. 🔴 은 `grade='red'` 이고
+    실패는 `grade=None` 이다.
+
+    프론트는 이 이벤트를 **갱신 신호로만** 쓰고 `GET /questions/{id}` 를 재조회한다 (`05 §12.2`).
+    """
+    await publish(
+        project_id=project_id,
+        event=SSE_ANSWER_COMPLETED,
+        data={
+            "question_id": str(question_id),
+            "grade": grade,
             "status": status,
         },
     )

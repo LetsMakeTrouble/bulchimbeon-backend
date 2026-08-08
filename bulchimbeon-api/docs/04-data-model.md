@@ -37,6 +37,7 @@ erDiagram
 
 - `projects ||--o| guidelines` — **0 또는 1**. 신규 프로젝트는 `guidelines` 행이 없으며, 최초 저장 시 생성된다(upsert).
 - `questions ||--o| answers` — 질문당 답변 **최대 1행**(`UNIQUE(question_id)`, §7). MVP는 답변 재생성 API를 제공하지 않는다.
+- `answers ↔ official_qas` — **순환 FK다.** `answers.official_qa_id`·`answers.similar_official_qa_id`가 `official_qas`를 가리키고, `official_qas.source_answer_id`가 `answers`를 되짚는다. 마이그레이션은 `answers` → `official_qas` 순으로 만든 뒤 앞의 두 FK를 `ALTER`로 붙이고, 모델은 `use_alter=True`를 단다(없으면 `Base.metadata.create_all`이 `CircularDependencyError`로 죽어 테스트가 통째로 멈춘다).
 - `review_cards`는 `project_id`(인박스 조회 키) · `question_id`(필수) · `answer_id`(NULL 가능) · `document_version_id`(NULL 가능)를 함께 참조한다.
 
 ## 2. 테이블 정의
@@ -121,6 +122,7 @@ erDiagram
 | content_ko / content_en | text | 🔴은 발행 안 하지만 내부 초안 보관(카드 표시용) |
 | source | text | `generated` \| `reused` |
 | official_qa_id | uuid FK NULL | reused 원본 / 확정 시 편입된 Q&A |
+| similar_official_qa_id | uuid FK NULL | `similar_threshold`~`reuse_threshold` 구간에서 첨부된 "비슷한 확정 답변" (룰 4·D24). `05 §6` 의 `similar_official_qa` 가 여기서 나온다 |
 | degraded_from_red | bool | DND 강등 여부 (룰 6) |
 | expires_at | timestamptz NULL | draft 생성 +`draft_expire_hours`(72h). **재사용 답변은 NULL** (D11) |
 | verified_at / verified_by | | 확정 정보 |

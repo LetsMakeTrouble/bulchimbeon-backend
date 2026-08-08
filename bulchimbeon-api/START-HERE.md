@@ -29,7 +29,7 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 | 1 | M0 스캐폴딩 — **✅ 완료 2026-08-07** | ~~`@prompts/00-kickoff.md`~~ DoD 5/5, `chore(M0): scaffold` | ⛔ 불가 |
 | 2 | M1 인증·프로젝트 — **✅ 완료 2026-08-08** | ~~`@prompts/01-auth-projects.md`~~ DoD 7/7, `feat(M1): auth, projects, members` | ⛔ 불가 |
 | 3 | M2 문서 인제스트 — **✅ 완료 2026-08-08** | ~~`@prompts/02-documents-ingest.md`~~ DoD 6/6, `feat(M2): document ingest pipeline` | 컷 없음(4포맷 전부) |
-| 4~5 | **M3 질문 파이프라인** ⭐ | `@prompts/03-question-pipeline.md 실행해줘` | ⛔ 불가 |
+| 4~5 | **M3 질문 파이프라인** ⭐ — **✅ 완료 2026-08-08** | ~~`@prompts/03-question-pipeline.md`~~ DoD 7/7, `feat(M3): question answering pipeline with grading` | ⛔ 불가 |
 | 6 | **M4 확인 워크플로** ⭐ | `@prompts/04-review-workflow.md 실행해줘` | ⛔ 불가 |
 | 7 | M5 알림·SSE | `@prompts/05-notifications-sse.md 실행해줘` | `answer.completed`만 필수 |
 | 8 | **클라우드 배포 1차** | `@prompts/09-seed-deploy.md 의 배포 부분만 먼저 실행해줘` | ⛔ 불가 |
@@ -44,75 +44,73 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 
 ## 다음 세션 프롬프트 (그대로 복붙)
 
-> ✅ **M2 문서 인제스트는 2026-08-08에 완료됐다** (`feat(M2): document ingest pipeline`). DoD 6/6.
-> `pytest` 128 passed + slow 1 passed, `ruff check`·`ruff format --check` 통과, 마이그레이션 head는 **0003**.
-> 실서버(`uvicorn --workers 1`) 스모크로 계약서 §4 **7개 엔드포인트**를 실커밋 경로에서 확인했다.
+> ✅ **M3 질문 파이프라인은 2026-08-08에 완료됐다** (`feat(M3): question answering pipeline with grading`). DoD 7/7.
+> `pytest` 217 passed + slow 1 passed, `ruff check`·`ruff format --check` 통과, 마이그레이션 head는 **0004**.
+> 실LLM 스모크(`scripts/smoke_pipeline.py`) 🟢 9.0s / 25s, 실서버(`uvicorn --workers 1`) 스모크로
+> 업로드→인제스트→질문→🟢 발행까지 실커밋 경로에서 확인했다(S=93, `sim_raw` 0.649).
 >
-> ⚠️ **`auto_activate=true`는 "지금 활성화"가 아니라 "인제스트가 `ready`면 활성화"다** (`02 §5` 구현 노트에 반영).
-> 업로드 201 응답의 `active_version`은 **아직 `null`**이고(새 버전이면 직전 버전이 그대로 활성),
-> 활성 전환은 `pipeline/ingest.py`가 ready 커밋 직후에 `document_service.activate_version`을 불러 수행한다.
-> 이유: 업로드 시점에 활성화하면 인제스트 실패 시 신버전(`active`+`failed`)도 구버전(`inactive`+`ready`)도
-> 검색 범위에서 탈락해 **그 문서의 근거가 통째로 사라진다**. 회귀 테스트:
-> `tests/test_documents.py:test_failed_new_version_does_not_take_down_the_previous_evidence`.
-> **M4의 재검토 연쇄 훅은 `activate_version` 안에 붙는다** — 근거가 실제로 교체되는 순간 딱 한 번 발화한다.
+> ⚠️ **`answers`에 컬럼이 하나 늘었다 — `similar_official_qa_id`** (`04 §2`에 반영, 사용자 승인).
+> `05 §6`의 `similar_official_qa`를 채울 자리가 데이터 모델에 없었다. 질문 임베딩을 저장하지 않으므로
+> 조회 시점에 다시 계산할 수도 없다. **`official_qa_id`를 재활용하지 마라** — D22가 "`official_qa_id`가
+> 있으면 맞았다 시 `correct_count++`"라서, 엉뚱한 Q&A의 카운트가 M4에서 올라간다.
 >
-> ⚠️⚠️ **M3가 가장 먼저 알아야 할 것 — `register_vector`는 제거됐다** (`03 §5.4` ③ 문서 갱신 완료)
-> `pgvector.asyncpg.register_vector`는 **raw asyncpg 전용**이다. SQLAlchemy 경로에서 코덱을 등록하면
-> `pgvector.sqlalchemy.Vector`의 문자열 변환과 이중 충돌해 **모든 벡터 바인딩**이 죽는다
-> (`DataError: '[1.0, 0.0, ...]' (expected list or ndarray)`). ORM INSERT뿐 아니라
-> `SELECT (:a)::vector <=> (:b)::vector` 같은 단순 캐스트도 함께 죽는다.
-> M1이 초록이었던 건 벡터를 **한 번도 바인딩하지 않았기** 때문이다. M3가 이걸 되돌리면 파이프라인 전체가 멈춘다.
-> 코덱 없이도 `<=>`는 그대로 **거리**다(직교 = 1.0, 실측 확인). 유사도는 여전히 `1 - (embedding <=> :q)`.
+> ⚠️ **`answers` ↔ `official_qas`는 순환 FK다.** 모델의 `use_alter=True`를 지우면
+> `Base.metadata.create_all`이 `CircularDependencyError`로 죽어 **테스트가 통째로** 멈춘다 (`04 §1`).
 >
-> **M3가 그대로 물려받는 것** (다시 만들지 마라)
-> - **`app/services/pipeline/retrieval.py`가 검색 범위의 단일 원천**이다. `searchable_chunks_query()`에
->   `order_by(Chunk.embedding.cosine_distance(q))` + `limit(retrieval_top_k)`만 얹어라.
->   3중 조건(`documents.status='active'` + `is_active` + `ingest_status='ready'`)을 우회해 `chunks`를
->   직접 조회하면 D20(soft delete)·룰 5(구버전)·`05 §12.3`(인제스트 미완)이 한꺼번에 깨진다.
-> - `app/services/llm/` — `get_provider()`가 프로바이더 선택의 **유일한 지점**이다. `LLM_PROVIDER` env를
->   호출 시점에 읽는다. `embed()`는 실구현·검증(1536 fail-fast)까지 끝났고,
->   **`complete_json`·`translate`는 M3가 채운다** (`responses.parse` 고정, `temperature` 금지,
->   `max_completion_tokens`). `FakeLLMProvider`의 `complete_json`은 스키마 필수 키만 채우는 더미이므로
->   M3에서 `06 §5`가 요구하는 **마커 기반 분기 응답**으로 확장해야 한다.
-> - `app/services/sse_manager.py` — `publish()` 몸통만 M5에서 채우면 된다. **호출부는 건드리지 마라.**
->   M3의 `answer.completed`도 같은 훅을 거친다.
-> - `tests/conftest.py`의 **`task_session_factory`** — BackgroundTasks가 여는 자체 세션을 테스트
->   트랜잭션에 물리는 픽스처다. M3 질문 파이프라인 테스트가 이것 없이는 개발 DB에 쓴다.
->   `fake_llm_provider`(세션 스코프 autouse)가 실 API 호출을 원천 차단한다.
-> - `app/utils/parsing.py`·`chunking.py` — 파싱·청킹은 순수 함수다. `heading_path`/`page_no`가
->   `05 §6` `citations[]`의 원천이다.
-> - **트랜잭션 경계는 라우터**다. 서비스는 `flush()`까지만 하고 커밋은 라우터가 한다.
+> **M4가 그대로 물려받는 것** (다시 만들지 마라)
+> - **`answers.question_struct`에 ⑦ 결과가 이미 들어 있다** (`{background, question, options[]}`).
+>   M4는 카드 생성 시 이것을 `review_cards.question_struct`로 **복사**만 한다. 다시 생성하지 마라.
+> - **`app/services/answer_service.py`** — `ensure_confirmable`(만료 답변 확정 차단, D13) ·
+>   `ensure_feedback_allowed`(D12) 가드가 단위 테스트까지 끝나 있다. M4는 카드/피드백 엔드포인트에서
+>   **부르기만** 하면 된다. `06 §5` 테스트 7의 e2e(카드 처리 → 409) 단언이 M4 몫이다.
+> - **카드 생성 지점은 `pipeline/answer.py`의 `_publish_generated` 끝**에 `TODO(M4)`로 표시돼 있다
+>   (🟢 `green`·🟡 `yellow`·🔴 `red`). 실패 카드는 `mark_question_failed` 안의 `TODO(M4)`다.
+> - `question_service._DEFAULT_CARD_STATUS` — `held_info.card_status`/`failure_info.card_status`가
+>   지금은 `"pending"` 고정이다. `review_cards`가 생기면 **실제 상태를 읽도록** 갈아끼운다.
+> - `question_service._to_answer_out`의 `feedback_summary`는 지금 0 고정이다(`TODO(M4)`).
+> - **`answer.reuse_missed` 이벤트가 이미 발행된다** (D26 분모). 후보 기준은 `similar_threshold` 이상이다.
+>   M4가 공식 Q&A를 만들기 시작하면 이 지표가 비로소 의미를 갖는다.
 >
-> ⚠️ **부분 UNIQUE 스왑은 M2에서도 그대로 재현됐다** — `document_service.activate_version`이
-> `04 §7`의 3문 절차(상위 행 `FOR UPDATE` → 전부 false → 하나만 true)를 쓴다.
-> 회귀 테스트 `tests/test_documents.py:test_activate_survives_both_swap_directions`는
-> **낮은→높은·높은→낮은을 4회 왕복**한다. 한 방향만 돌리면 잘못된 단일 UPDATE가 초록으로 통과한다.
-> `synchronize_session="fetch"`도 그대로 필요하다(identity map이 낡은 `is_active`를 돌려준다).
+> ⚠️ **`FakeLLMProvider`는 마커로 분기한다** — 질문 본문의 `[[fake:sentences=5,supported=2]]` 같은 토큰이다.
+> 마커 표는 `app/services/llm/fake_provider.py` 독스트링에 있다. ① 번역이 `content_en = "[en] {원문}"`을
+> 만들기 때문에 마커가 ②④⑦까지 그대로 실려 간다 — **① 의 user 프롬프트에 장식을 붙이면 이 규약이 깨진다.**
+> 유사도에 의존하는 테스트는 `tests/pipeline_helpers.embedding_with_cosine`이 **목표 코사인을 갖는 벡터를
+> 합성**해 심는다(해시 임베딩끼리는 코사인이 사실상 0이라 S가 항상 0이 된다).
+>
+> ⚠️ **`tests/conftest.py`의 `task_session_factory`가 `answer.session_factory`도 갈아끼운다.**
+> 파이프라인은 실패 기록용 세션을 **따로** 연다(예외가 난 세션 위에서는 커밋할 수 없다) — 둘 다 같은
+> 팩토리를 거치므로 한 곳만 바꾸면 된다. `reset_llm_quota`(autouse)는 프로세스 메모리 카운터를 비운다.
+>
+> ⚠️ **테스트에서 `db_session.expire_all()`을 함부로 부르지 마라.** 이미 돌려받은 ORM 객체까지 만료돼
+> 다음 속성 접근이 동기 IO를 시도하다 `MissingGreenlet`으로 죽는다. 파이프라인은 다른 세션이지만 같은
+> 커넥션을 공유하므로 **새 행은 그냥 보인다**. 만료가 필요한 건 테스트 세션이 직접 적재한 객체뿐이다.
 
 ```
-@prompts/AUTORUN.md @prompts/03-question-pipeline.md
+@prompts/AUTORUN.md @prompts/04-review-workflow.md
 
-두 문서를 읽고 M3 질문 파이프라인을 실행해줘.
+두 문서를 읽고 M4 확인 워크플로를 실행해줘.
 
 AUTORUN.md가 실행 규약이다. 특히 §3 "반드시 질문해야 하는 상황"을 지켜줘 —
 사양이 갈리거나, 실측이 문서를 뒤집거나, 외부 계정·비가역 작업이 필요하거나,
 DoD가 안 닫히거나, 스코프가 애매하면 추측하지 말고 AskUserQuestion으로 물어봐.
 반대로 §4에 있는 것들(문서에 답이 있는 것, 관례적 판단)은 묻지 말고 그냥 진행해.
-M3는 데모의 심장이라 위임하지 말고 직접 해줘(§5).
+M4도 데모의 심장이라 위임하지 말고 직접 해줘(§5).
 
-M0·M1·M2는 이미 끝났다. 임계값은 config.py의 DEFAULT_SETTINGS에만 있고, 에러 코드는
-core/errors.py에 05 §1.4대로 있고, 권한 의존성은 core/deps.py(require_asker 포함)에 있다.
-LLM 호출은 services/llm/get_provider() 경유만이고, 검색 범위는
-services/pipeline/retrieval.py의 searchable_chunks_query()가 단일 원천이다 —
-새로 만들지 말고 그대로 쓴다(룰 2·3, §7).
+M0~M3은 이미 끝났다. questions/answers/answer_citations/official_qas 테이블과
+질문 파이프라인(①~⑧)이 돌아간다. ⑦ 구조화 결과는 answers.question_struct에 이미
+저장돼 있으니 카드로 복사만 해라 — 다시 생성하지 마라.
+만료·피드백 상태 가드는 services/answer_service.py에 있다(부르기만 하면 된다).
+카드 생성 지점은 services/pipeline/answer.py의 TODO(M4) 주석에 표시돼 있다.
 
-⚠️ app/database.py의 register_vector 제거를 되돌리지 마라. SQLAlchemy 경로에서 코덱을
-등록하면 모든 벡터 바인딩이 DataError로 죽는다(M2 실측, 03 §5.4 ③에 반영됨).
-유사도는 1 - (embedding <=> :q)다. <=>는 거리다.
+⚠️ answers ↔ official_qas는 순환 FK다. 모델의 use_alter=True를 지우면
+create_all이 CircularDependencyError로 죽어 테스트가 통째로 멈춘다.
+⚠️ 유사도는 1 - (embedding <=> :q)다. <=>는 거리다.
+⚠️ 확정 ko 원문은 재번역 금지(D5). 재사용 답변은 카드를 만들지 않는다(D11).
 
-M3 DoD를 하나씩 확인하고(06 §5의 1~7번 테스트 포함), 실LLM 스모크 1회까지 돌리고,
+M4 DoD(시나리오 B 전 구간: 질문→🔴→수정→확정→재질문 즉답)를 하나씩 확인하고,
+06 §5 테스트 7의 e2e(만료 답변 카드 처리 → 409)까지 닫고,
 통과하면 커밋하고, START-HERE.md 세션표를 갱신한 뒤 보고하고 멈춰줘.
-M4는 새 세션에서 이어간다.
+M5는 새 세션에서 이어간다.
 ```
 
 > 이후 마일스톤도 같은 형태다 — `@prompts/AUTORUN.md @prompts/01-auth-projects.md` 처럼

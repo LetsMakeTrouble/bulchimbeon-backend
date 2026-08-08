@@ -1,0 +1,181 @@
+"""질문·답변 스키마 (`05 §6` 과 1:1).
+
+⚠️ **계약서에 없는 필드를 만들지 않는다.** `05` 는 프론트 팀과의 계약이다 (룰 7 주변).
+없는 값은 `null` 로 내려보내되 필드 자체는 유지한다 — 프론트가 키 존재를 전제로 렌더한다.
+"""
+
+from datetime import datetime
+from typing import Any, Literal
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
+MAX_QUESTION_LENGTH = 4000
+
+Urgency = Literal["normal", "urgent"]
+Grade = Literal["green", "yellow", "red"]
+QuestionStatus = Literal["processing", "answered", "held", "failed"]
+AnswerState = Literal["draft", "verified", "under_review", "expired", "rejected"]
+HeldReason = Literal["conflict", "no_evidence", "low_confidence", "schema_failed", "quota_exceeded"]
+
+
+class QuestionCreate(BaseModel):
+    content_ko: str = Field(min_length=1, max_length=MAX_QUESTION_LENGTH)
+    urgency: Urgency = "normal"
+
+
+class QuestionAccepted(BaseModel):
+    """202 — 파이프라인 비동기 시작 (`05 §6`, D3 "질문 POST 는 202 즉시 반환").
+
+    ⚠️ `suggest_urgent` 는 **접수 시점의 값**이라 항상 `false` 다. 이 플래그를 만드는 것은
+    파이프라인 ① 이고(`06 §2` ①), D3 가 즉시 반환을 요구하므로 202 는 ① 을 기다리지 않는다.
+    파이프라인이 채운 값은 `questions.suggest_urgent` 에 남는다.
+    """
+
+    question_id: UUID
+    status: QuestionStatus
+    suggest_urgent: bool
+    created_at: datetime
+
+
+class UrgencyPatch(BaseModel):
+    urgency: Urgency
+
+
+class UrgencyPatched(BaseModel):
+    id: UUID
+    urgency: Urgency
+    status: QuestionStatus
+
+
+class FeedbackSummary(BaseModel):
+    """`05 §6`. M4 의 `feedbacks` 테이블이 원천이며 M3 에서는 항상 0 이다."""
+
+    correct: int = 0
+    different: int = 0
+    my_feedback: Literal["correct", "different"] | None = None
+
+
+class Citation(BaseModel):
+    """`05 §6` `citations[]` — 기능 2.2 근거 원문 열람의 전제.
+
+    `document_id`·`document_version_id` 없이는 열람 URL 을 만들 수 없으므로 **필수 제공**이다.
+    `similarity` 는 **원시 코사인**이다 — `matching_rate` 와 스케일이 다르므로 % 로 표시하지 않는다.
+    """
+
+    id: UUID
+    chunk_id: UUID
+    document_id: UUID
+    document_version_id: UUID
+    doc_title: str
+    version_no: int
+    heading_path: list[str]
+    page_no: int | None
+    quote: str
+    similarity: float
+
+
+class AnswerOut(BaseModel):
+    id: UUID
+    grade: Grade
+    state: AnswerState
+    matching_rate: int | None
+    search_score: int | None
+    grounding_score: int | None
+    content_ko: str
+    content_en: str
+    source: Literal["generated", "reused"]
+    degraded_from_red: bool
+    expires_at: datetime | None
+    disclaimer: str | None
+    citations: list[Citation]
+    feedback_summary: FeedbackSummary
+    official_qa: "OfficialQARef | None" = None
+
+
+class OfficialQARef(BaseModel):
+    """재사용 답변의 원본 (`05 §6` 재사용 표)."""
+
+    id: UUID
+    question_ko: str
+    reuse_count: int
+
+
+class SimilarOfficialQA(BaseModel):
+    """`similar_threshold` ~ `reuse_threshold` 구간에서 첨부된다 (룰 4, D24)."""
+
+    id: UUID
+    question_ko: str
+    answer_ko: str
+    similarity: float
+
+
+class HeldInfo(BaseModel):
+    reason: HeldReason
+    message: str
+    card_status: Literal["pending", "deferred", "resolved"]
+
+
+class FailureInfo(BaseModel):
+    """`held_info` 와 대칭 구조 (D23). `reason` 은 **로깅용 코드**다."""
+
+    reason: str
+    message: str
+    card_status: Literal["pending", "deferred", "resolved"]
+
+
+class AskedBy(BaseModel):
+    id: UUID
+    name: str
+
+
+class QuestionDetail(BaseModel):
+    """`05 §6` GET /questions/{id} — 핵심 화면."""
+
+    id: UUID
+    content_ko: str
+    content_en: str | None
+    urgency: Urgency
+    status: QuestionStatus
+    asked_by: AskedBy
+    answer: AnswerOut | None
+    similar_official_qa: SimilarOfficialQA | None
+    held_info: HeldInfo | None
+    failure_info: FailureInfo | None
+
+
+class QuestionListItem(BaseModel):
+    """`05 §6` 목록 아이템 — **이것만으로 질문자 채팅 목록을 그릴 수 있다.**"""
+
+    id: UUID
+    content_ko: str
+    status: QuestionStatus
+    grade: Grade | None
+    matching_rate: int | None
+    state: AnswerState | None
+    created_at: datetime
+    feedback_summary: FeedbackSummary | None
+
+
+class QuestionListResponse(BaseModel):
+    """`05 §1.2` 페이지네이션 봉투."""
+
+    items: list[QuestionListItem]
+    total: int
+    limit: int
+    offset: int
+
+
+AnswerOut.model_rebuild()
+
+
+class QuestionStruct(BaseModel):
+    """⑦ 결과 (`06 §2` ⑦). M4 가 `review_cards.question_struct` 로 복사한다."""
+
+    background: str
+    question: str
+    options: list[str]
+
+    @classmethod
+    def from_jsonb(cls, value: dict[str, Any] | None) -> "QuestionStruct | None":
+        return cls.model_validate(value) if value else None

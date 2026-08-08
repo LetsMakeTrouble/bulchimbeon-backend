@@ -17,6 +17,19 @@ EVENT_MEMBER_JOINED = "member.joined"
 EVENT_ANSWERER_TRANSFERRED = "answerer.transferred"
 EVENT_DOCUMENT_VERSION_ACTIVATED = "document.version_activated"
 
+# M3 질문 파이프라인 (`04 §5`).
+EVENT_QUESTION_CREATED = "question.created"
+EVENT_QUESTION_STATUS_CHANGED = "question.status_changed"  # payload: from, to (`04 §6.1` 전 전이)
+EVENT_QUESTION_GRADED = "question.graded"
+EVENT_ANSWER_PUBLISHED = "answer.published"
+EVENT_ANSWER_REUSED = "answer.reused"
+# ⚠️ 재질문 즉답률(D26)의 **분모**를 만드는 이벤트다. 게이트 탈락 시 반드시 남긴다 —
+#    이게 없으면 분모가 만들어지지 않아 지표가 항상 100% 로 보인다.
+EVENT_ANSWER_REUSE_MISSED = "answer.reuse_missed"
+
+ENTITY_QUESTION = "question"
+ENTITY_ANSWER = "answer"
+
 
 async def record_event(
     db: AsyncSession,

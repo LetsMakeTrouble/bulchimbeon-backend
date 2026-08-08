@@ -5,11 +5,18 @@
 """
 
 from app.config import settings
-from app.services.llm.base import LLMProvider, LLMProviderError
+from app.services.llm.base import LLMProvider, LLMProviderError, LLMSchemaError
 from app.services.llm.fake_provider import FakeLLMProvider
 from app.services.llm.openai_provider import OpenAIProvider
 
-__all__ = ["FakeLLMProvider", "LLMProvider", "LLMProviderError", "OpenAIProvider", "get_provider"]
+__all__ = [
+    "FakeLLMProvider",
+    "LLMProvider",
+    "LLMProviderError",
+    "LLMSchemaError",
+    "OpenAIProvider",
+    "get_provider",
+]
 
 _PROVIDERS: dict[str, type] = {
     "openai": OpenAIProvider,

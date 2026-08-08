@@ -24,6 +24,7 @@ from app.models.project import (
     Project,
     ProjectMember,
 )
+from app.models.question import Question
 from app.models.user import User
 
 # auto_error=False — 헤더가 없을 때 starlette 이 403 을 던지지 않게 하고
@@ -129,4 +130,50 @@ async def require_document_answerer(
     """담당자 전용 쓰기 (`05 §4`)."""
     if access.member.role != ROLE_ANSWERER:
         raise ForbiddenRole("담당자만 수행할 수 있습니다.")
+    return access
+
+
+@dataclass(frozen=True)
+class QuestionAccess:
+    """`/questions/{id}` 경로의 권한 확인 결과 (`05 §6`).
+
+    문서 경로와 같은 이유로 질문을 먼저 읽어 소속 프로젝트를 알아낸다.
+    라우터가 질문을 다시 조회하지 않도록 함께 돌려준다.
+    """
+
+    question: Question
+    member: ProjectMember
+
+
+async def require_question_member(
+    question_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> QuestionAccess:
+    """멤버 읽기 (`05 §6`).
+
+    ⚠️ 남의 프로젝트 질문도 **404** 다 — 403 을 주면 "그 id 의 질문이 존재한다"는 사실이
+    비멤버에게 새어 나간다 (문서 경로와 같은 규약).
+    """
+    question = await db.get(Question, question_id)
+    if question is None:
+        raise NotFound()
+
+    try:
+        member = await _active_membership(db, question.project_id, user)
+    except NotMember:
+        raise NotFound() from None
+    return QuestionAccess(question=question, member=member)
+
+
+async def require_question_author(
+    access: QuestionAccess = Depends(require_question_member),
+    user: User = Depends(get_current_user),
+) -> QuestionAccess:
+    """질문 **작성자** 전용 (`05 §6` PATCH /questions/{id}).
+
+    담당자라도 남의 질문의 긴급도를 바꿀 수 없다 — 긴급 여부를 정하는 주체는 질문자다 (D10).
+    """
+    if access.question.asker_id != user.id:
+        raise ForbiddenRole("질문 작성자만 수행할 수 있습니다.")
     return access

@@ -22,7 +22,8 @@ from app.config import settings
 from app.database import Base, create_engine, get_db
 from app.services import llm
 from app.services.llm.fake_provider import FakeLLMProvider
-from app.services.pipeline import ingest
+from app.services.pipeline import answer as answer_pipeline
+from app.services.pipeline import ingest, quota
 
 # ⚠️ `Base.metadata.create_all` 이 테이블을 만들려면 모델이 먼저 등록돼 있어야 한다.
 # 빠뜨리면 테이블 없이 테스트가 돌다가 엉뚱한 곳에서 터진다 (또는 조용히 초록이다).
@@ -169,10 +170,13 @@ def fake_llm_provider() -> Iterator[FakeLLMProvider]:
 async def task_session_factory(db_connection: AsyncConnection) -> AsyncIterator[None]:
     """BackgroundTasks 가 여는 **자체 세션**을 테스트 트랜잭션에 물린다.
 
-    운영에서 인제스트 태스크는 `AsyncSessionLocal()` 로 전역 엔진의 새 세션을 연다
-    (`03 §2` 원칙 4). 테스트에서 그대로 두면 태스크가 **개발 DB** 에 쓰고, 롤백 격리
-    (`03 §5.3`)를 우회해 테스트가 서로를 오염시킨다.
+    운영에서 백그라운드 태스크(인제스트·질문 파이프라인)는 `AsyncSessionLocal()` 로 전역
+    엔진의 새 세션을 연다 (`03 §2` 원칙 4). 테스트에서 그대로 두면 태스크가 **개발 DB** 에
+    쓰고, 롤백 격리(`03 §5.3`)를 우회해 테스트가 서로를 오염시킨다.
     같은 커넥션에 세이브포인트로 물려 두면 태스크가 쓴 것도 테스트 종료 시 함께 롤백된다.
+
+    ⚠️ 질문 파이프라인은 **실패 기록용 세션을 따로 연다**(예외가 난 세션 위에서는 커밋할 수
+    없기 때문). 그것도 같은 팩토리를 거치므로 여기 한 곳만 갈아끼우면 된다.
     """
 
     def factory() -> AsyncSession:
@@ -182,12 +186,24 @@ async def task_session_factory(db_connection: AsyncConnection) -> AsyncIterator[
             expire_on_commit=False,
         )
 
-    original = ingest.session_factory
+    originals = (ingest.session_factory, answer_pipeline.session_factory)
     ingest.session_factory = factory
+    answer_pipeline.session_factory = factory
     try:
         yield
     finally:
-        ingest.session_factory = original
+        ingest.session_factory, answer_pipeline.session_factory = originals
+
+
+@pytest.fixture(autouse=True)
+def reset_llm_quota() -> Iterator[None]:
+    """일일 LLM 호출 카운터는 **프로세스 메모리**다 (`services/pipeline/quota.py`).
+
+    비우지 않으면 앞선 테스트의 호출이 쌓여 뒤 테스트가 뜬금없이 `quota_exceeded` 로 떨어진다.
+    """
+    quota.reset()
+    yield
+    quota.reset()
 
 
 @pytest_asyncio.fixture

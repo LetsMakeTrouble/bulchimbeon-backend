@@ -11,16 +11,22 @@
 
 from app.models.document import Chunk, Document, DocumentVersion
 from app.models.event import Event
+from app.models.official_qa import OfficialQA
 from app.models.project import Guideline, Project, ProjectMember
+from app.models.question import Answer, AnswerCitation, Question
 from app.models.user import User
 
 __all__ = [
+    "Answer",
+    "AnswerCitation",
     "Chunk",
     "Document",
     "DocumentVersion",
     "Event",
     "Guideline",
+    "OfficialQA",
     "Project",
     "ProjectMember",
+    "Question",
     "User",
 ]

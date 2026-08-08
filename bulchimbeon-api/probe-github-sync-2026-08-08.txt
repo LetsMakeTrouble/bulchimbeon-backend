@@ -1,0 +1,17 @@
+# M8 GitHub 실 레포 프로브 — 2026-08-08T17:14:04+00:00
+repo=github/gitignore branch=main path_glob='*.md' token=없음
+
+① 열거: 2개 매칭
+   - github/gitignore:CONTRIBUTING.md  sha=ab8efb28f2d7  → CONTRIBUTING.md
+   - github/gitignore:README.md  sha=7a65379954ac  → README.md
+
+② 본문: github/gitignore:CONTRIBUTING.md — 2636 bytes
+   첫 줄: '# Contributing guidelines'
+   원격 sha=ab8efb28f2d76038b508d4e377b5e651c378bae4
+   로컬 sha=ab8efb28f2d76038b508d4e377b5e651c378bae4
+   ✅ git blob 해시가 일치한다 — 변경 감지의 전제가 성립한다
+
+③ 변경 판정: 같은 내용 → unchanged=True (기대 True)
+             바뀐 내용 → unchanged=False (기대 False)
+
+## ✅ 통과 — 실 GitHub 응답이 구현의 전제와 일치한다

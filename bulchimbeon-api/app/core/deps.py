@@ -18,6 +18,7 @@ from app.core.errors import ForbiddenRole, NotFound, NotMember, Unauthorized
 from app.core.security import ACCESS_TOKEN_TYPE, access_token_expires_at, decode_token
 from app.database import get_db
 from app.models.document import Document
+from app.models.integration import Integration
 from app.models.lesson import LESSON_STATUS_DELETED, Lesson
 from app.models.official_qa import OfficialQA
 from app.models.project import (
@@ -149,6 +150,38 @@ async def require_document_answerer(
     if access.member.role != ROLE_ANSWERER:
         raise ForbiddenRole("담당자만 수행할 수 있습니다.")
     return access
+
+
+@dataclass(frozen=True)
+class IntegrationAccess:
+    """`/integrations/{id}` 경로의 권한 확인 결과 (`05 §5` — 담당자 전용)."""
+
+    integration: Integration
+    member: ProjectMember
+
+
+async def require_integration_answerer(
+    integration_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IntegrationAccess:
+    """`05 §5` 는 연동 전 경로가 **담당자 전용**이다 — 동기화·해제 모두 담당자만 한다.
+
+    ⚠️ 남의 프로젝트 연동은 **404** 다(문서·질문 경로와 같은 규약). 연동에는 토큰이 붙어
+    있으므로 존재 여부조차 흘리지 않는다. 같은 프로젝트의 질문자는 403 이다.
+    """
+    integration = await db.get(Integration, integration_id)
+    if integration is None:
+        raise NotFound()
+
+    try:
+        member = await _active_membership(db, integration.project_id, user)
+    except NotMember:
+        raise NotFound() from None
+
+    if member.role != ROLE_ANSWERER:
+        raise ForbiddenRole("담당자만 수행할 수 있습니다.")
+    return IntegrationAccess(integration=integration, member=member)
 
 
 @dataclass(frozen=True)

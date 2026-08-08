@@ -34,7 +34,7 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 | 7 | M5 알림·SSE — **✅ 완료 2026-08-08** | ~~`@prompts/05-notifications-sse.md`~~ DoD 6/6, `feat(M5): notifications, sse, expiry sweeper` | 컷 없음(전 범위) |
 | 8 | M6 브리핑·교훈 — **✅ 완료 2026-08-08** | ~~`@prompts/06-briefing-lessons.md`~~ DoD 8/8, `feat(M6): briefing scheduler and lesson memory` | 컷 없음(전 범위) |
 | 9 | M7 지표 — **✅ 완료 2026-08-08** | ~~`@prompts/07-metrics-events.md`~~ DoD 7/7, `feat(M7): events timeline and metrics` | 컷 없음(4종+정확도) |
-| 10 | M8 외부 연동 | `@prompts/08-integrations.md 실행해줘` | 컷 없음 (AUTORUN §1) |
+| 10 | M8 외부 연동 — **✅ 완료 2026-08-08** | ~~`@prompts/08-integrations.md`~~ DoD 5/5, `feat(M8): notion and github sync` | 컷 없음 (AUTORUN §1) |
 | 11 | M9 시드 | `@prompts/09-seed-deploy.md 의 시드 부분` | ⛔ 시드는 불가 |
 | 12 | **클라우드 배포 + 리허설** | `@prompts/09-seed-deploy.md 의 배포·리허설 부분` | ⛔ 불가 |
 
@@ -57,10 +57,35 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 
 ## 다음 세션 프롬프트 (그대로 복붙)
 
-> ✅ **M7 지표·타임라인은 2026-08-08에 완료됐다** (`feat(M7): events timeline and metrics`).
-> `pytest` **389 passed**(slow 포함), `ruff check`·`ruff format --check` 통과,
-> 마이그레이션 head는 **0008**. `alembic check` = "No new upgrade operations detected".
-> `grep -rn "TODO(M7)" app/` → **0건**. 별도 리뷰 패스(`code-reviewer`+`verifier`) 통과.
+> ✅ **M8 외부 연동은 2026-08-08에 완료됐다** (`feat(M8): notion and github sync`).
+> `pytest` **459 passed**, `ruff check`·`ruff format --check` 통과, 마이그레이션 head는 **0010**.
+> `alembic check` = "No new upgrade operations detected".
+> 실 GitHub 공개 레포 e2e 1회 통과 — `probe-github-sync-2026-08-08.txt`.
+> 별도 리뷰 패스(`code-reviewer`) — 지적 14건 중 **차단 2건 포함 12건 수정**, 2건은 사양대로
+> 유지(아래 미해결). 리뷰가 잡은 진짜 결함 둘은 목킹 테스트로는 드러나지 않던 것이었다:
+> Notion 페이지 하나의 실패가 **전체 동기화를 죽이던 것**(`08 §6` 위반), 그리고 인제스트가
+> 실패한 문서가 다음 실행부터 `unchanged`로 보고돼 **검색에서 빠진 채 실패 목록에서도
+> 사라지던 것**. 둘 다 회귀 테스트가 붙었다.
+>
+> ### ⚠️ M8이 남긴 것 중 **M9·배포에 영향을 주는 것**
+> - ⭐ **`INTEGRATION_ENCRYPTION_KEY`가 `.env`에 생겼다**(2026-08-08 생성, 랜덤 Fernet 키).
+>   `04 §2` `integrations.config`의 토큰은 이 키로 암호화돼 있다. **배포 환경에 같은 값을
+>   넣지 않으면** 그 연동은 복호화에 실패해 다시 등록해야 한다(문서·지식은 그대로 남는다).
+>   env 값은 정식 Fernet 키가 아니어도 되고(`03 §4` 예시값도 동작), SHA-256으로 파생된다.
+> - **`04 §5` 이벤트 26종이 전부 기록된다.** 마지막 하나였던 `sync.run`을 M8이 채웠고
+>   스코프는 `entity_type='integration'`, payload는 `{provider, status, scanned,
+>   new_documents, new_versions, unchanged, skipped, repaired, restored, failed[]}`다
+>   (열거 자체가 실패하면 `fatal`이 붙는다). **동기화 실패 목록이 사는 유일한 곳**이며
+>   `integrations`에는 컬럼을 더하지 않았다(사용자 결정 2026-08-08).
+> - **`documents`에 부분 UNIQUE `(project_id, source_type, source_ref)`가 생겼다**
+>   (마이그 0010, 사용자 결정 2026-08-08). 외부 원본 1개 = 문서 1개를 DB가 강제한다 —
+>   락이 아니라 제약으로 막는 방식은 `briefing_runs`(결정 1.11)와 같다.
+>   업로드 문서는 `source_ref`가 NULL이라 대상 밖이다.
+> - **`document_service`에 바이트 기반 진입점이 생겼다** — `create_version_from_bytes` ·
+>   `create_synced_document` · `find_by_source_ref` · `latest_version`. 업로드 경로도 이제
+>   `create_version_from_bytes`를 거치므로 버전 번호 잠금·저장 규칙의 구현은 한 곳뿐이다.
+> - **시드는 연동을 만들지 않는다.** `08 §4` 데모 시나리오에 연동이 등장하지 않고, 시드가
+>   외부 네트워크에 의존하는 순간 오프라인에서 재현이 깨진다.
 >
 > ### ⚠️ M7이 고친 것 — `created_at` 기본값이 `now()`가 아니라 `clock_timestamp()`다
 > M7 작업 1(이벤트 감사)이 찾은 건 **빠진 이벤트 타입이 아니라 시각이었다.** `04 §5`의 26종 중
@@ -73,33 +98,32 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 > 직접 쓰면 같은 결함이 되살아난다. 이제 `alembic/env.py`가 `compare_server_default=True`라
 > 모델과 DB의 기본값이 어긋나면 `alembic check`가 잡는다.
 >
-> **M8이 그대로 물려받는 것** (다시 만들지 마라)
-> - ⭐ **`sync.run`은 `04 §5` 이벤트 타입 중 유일하게 아직 기록되지 않은 하나다.** M8이 채운다.
->   `event_service`에 상수부터 추가한다(타입 문자열을 인라인으로 쓰지 않는다).
-> - ⭐ **`sync.completed`/`sync.failed` 알림과 SSE `sync.completed`는 이미 닫힌 집합 안에 있다.**
->   `tests/test_notification_contract.py`가 `04 §4`와 `05 §12.3`을 **정규식으로 파싱해** 막으므로
->   문안·payload를 문서와 다르게 만들면 그 자리에서 터진다. SSE payload는
->   `{integration_id, new_documents, new_versions}` 고정이다.
-> - **동기화가 만든 새 버전은 M2·M4 파이프라인을 그대로 탄다** — `document_service`의 인제스트·
->   활성화와 `review_cascade_service.cascade_for_document`가 이미 룰 5를 구현한다. 별도 경로를
->   만들면 "문서가 바뀌었는데 확정 답변이 재검토되지 않는" 구멍이 생긴다(`08 §3` 3번이 명시).
-> - **활성 버전 교체는 2문 절차**다(`04 §7`). 동기화가 버전을 올릴 때도 예외 없다 —
->   단일 UPDATE는 행 순서에 따라 통과하기도 해서 테스트가 초록인 채 운영에서 간헐 실패한다.
+> **M9가 그대로 물려받는 것** (다시 만들지 마라)
 > - **지표·타임라인은 손대지 않는다.** `metrics_service`(비율 4종·시계열)와
 >   `accuracy_service.for_grade`(D25)가 정의의 유일한 위치이고, `event_service.list_timeline`이
 >   타임라인의 유일한 조회다. 새 이벤트를 기록하기만 하면 시계열·타임라인에 자동으로 실린다.
-> - **이벤트는 전부 질문 스코프**로 남긴다(`event_service.ENTITY_ANSWER` 주석). `sync.run`은
->   질문이 아니라 연동 스코프이므로 `entity_type='integration'`이 자연스럽다 — 이건 `04 §5`가
->   payload를 규정하지 않은 지점이라 **구현 전에 물어라**.
+> - **활성 버전 교체는 3문 절차**다(`04 §7`, `document_service.activate_version`). 시드도
+>   예외 없다 — 단일 UPDATE는 행 순서에 따라 통과하기도 해서 테스트가 초록인 채 운영에서
+>   간헐 실패한다.
+> - **시드는 서비스 레이어를 직접 부른다**(`09 §2`). HTTP를 태우지 않으므로 권한 의존성이
+>   끼지 않고, 카드 상세를 호출하지 않아 `first_viewed_at`이 오염되지 않는다.
 >
-> ⚠️ **`INTEGRATION_ENCRYPTION_KEY`(Fernet)와 Notion·GitHub 토큰은 직접 만들 수 없다.**
-> AUTORUN §3.3 — 외부 계정·키가 필요한 지점이다. 시작하자마자 요청하고, 그동안 스텁 경로와
-> 모델·마이그레이션처럼 키가 필요 없는 작업을 먼저 한다.
+> ### ⚠️ M8이 겪은 것 — 테스트 DB는 **기존 테이블에 붙은 새 인덱스를 반영하지 않는다**
+> `Base.metadata.create_all`은 테이블 단위로 `checkfirst`한다. 테이블이 이미 있으면 통째로
+> 건너뛰므로 새 인덱스가 들어가지 않는다 — **새 테이블 추가는 멀쩡히 반영되기 때문에**
+> 눈치채기 어렵다. M8의 `uq_documents_source_ref`를 넣었을 때 제약 검증 테스트가 "제약이
+> 없어서" 실패했다. 기존 테이블에 제약·인덱스를 더했으면 테스트 DB를 한 번 지운다
+> (명령은 `tests/conftest.py` 상단). 마이그레이션 자체는 `test_migrations.py`가 별도
+> 스크래치 DB에서 검증하므로 영향이 없다.
 >
-> ⚠️ **`08-integrations.md` 상단의 "⛔ 기본 제외"는 적용하지 않는다** — AUTORUN §1이
-> "M8 실구현이 전부 범위 안"이라고 뒤집었다. 스텁 501로 끝내지 마라.
+> 🔧 **M8이 남긴 알려진 미해결 1건** (커밋했고, 급하지 않다):
+> - **실패한 동기화에는 SSE가 없다.** `05 §12.3`의 sync 계열 이벤트가 `sync.completed`
+>   하나뿐이라 계약을 지킨 결과다. 담당자는 `sync.failed` 알림과 `last_sync_status`로 안다.
+>   ⚠️ **DND 구간(기본 22:00~07:00)에는 그 알림마저 다음 브리핑까지 보류된다**(룰 6) —
+>   즉 밤에 실패한 동기화는 `GET /projects/{id}/integrations`의 `last_sync_status`를
+>   보기 전까지 아무 신호가 없다. 프론트에 "이 버튼은 실패 시 조용할 수 있다"를 전달할 것.
 >
-> 🔧 **M7이 남긴 알려진 미해결 2건** (커밋했고, 급하지 않다):
+> 🔧 **M7이 남긴 알려진 미해결 2건** (여전히 유효하다):
 > - `card_handle_30s_rate`는 `payload->>'card_id'`로 조인한다 — JSONB 안이라 인덱스를 타지
 >   않는다. 바깥 집합이 "창 안에 열람된 카드"로 좁혀져 있어 데모·운영 규모에서는 문제가 아니지만,
 >   프로젝트 하나의 이벤트가 수십만 건이 되면 `events(type, (payload->>'card_id'))`가 필요하다.
@@ -109,36 +133,36 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 >   문자 그대로 따른 결과이며, 바꾸려면 D25를 먼저 고쳐야 한다.
 
 ```
-@prompts/AUTORUN.md @prompts/08-integrations.md
+@prompts/AUTORUN.md @prompts/09-seed-deploy.md
 
-두 문서를 읽고 M8 외부 연동(Notion·GitHub)을 실행해줘.
+두 문서를 읽고 M9 중 **시드 부분(작업 1·2·3)** 을 실행해줘. 배포·리허설(4·5번)은
+다음 세션이다 — 이번 세션에서 배포까지 하지 마라.
 
 AUTORUN.md가 실행 규약이다. 특히 §3 "반드시 질문해야 하는 상황"을 지켜줘 —
 사양이 갈리거나, 실측이 문서를 뒤집거나, DoD가 안 닫히거나, 스코프가 애매하면
 추측하지 말고 AskUserQuestion으로 물어봐. 반대로 §4에 있는 것들(문서에 답이
 있는 것, 관례적 판단)은 묻지 말고 그냥 진행해.
 
-⚠️ 08-integrations.md 상단의 "⛔ 기본 제외"와 스텁 501 경로는 **적용하지 않는다.**
-데드라인이 없으므로 GitHub·Notion 동기화를 실제로 구현한다 (AUTORUN §1).
+⚠️ 09-seed-deploy.md 상단의 "배포는 6일차로 앞당긴다"는 **이미 뒤집혔다** —
+   사용자 결정 2026-08-08 로 개발 완주 후 배포다 (START-HERE 세션표 참조).
 
-M0~M7은 끝났다. 마이그레이션 head는 0008, pytest 389 passed다.
-M7이 남겨 둔 접점 (다시 만들지 마라):
-- sync.run 은 04 §5 이벤트 타입 중 아직 기록되지 않은 유일한 하나다. M8 이 채운다.
-- 동기화가 만든 새 버전은 M2 인제스트 + M4 재검토 연쇄를 그대로 탄다.
-  별도 경로를 만들면 룰 5(문서 갱신 시 확정 답변 재검토)가 조용히 깨진다.
-- created_at 기본값은 clock_timestamp() 다. 새 모델은 CreatedAtMixin/TimestampMixin
-  을 그대로 쓴다 — func.now() 를 직접 쓰면 M7 이 고친 결함이 되살아난다.
-- 지표·타임라인은 손대지 마라. 이벤트를 기록하기만 하면 자동으로 실린다.
+M0~M8은 끝났다. 마이그레이션 head는 0010, pytest 459 passed다.
+M8이 남겨 둔 접점 (다시 만들지 마라):
+- 04 §5 이벤트 26종이 전부 기록된다. 시드가 서비스 레이어를 그대로 부르면
+  지표·타임라인·시계열이 자동으로 채워진다.
+- document_service 에 바이트 기반 진입점이 있다 (create_version_from_bytes /
+  create_synced_document). 시드가 파일을 넣을 때 새 경로를 만들지 마라.
+- 시드는 연동(integrations)을 만들지 않는다. 08 §4 데모에 연동이 없고, 시드가
+  외부 네트워크에 의존하면 오프라인 재현이 깨진다.
 
-⚠️ INTEGRATION_ENCRYPTION_KEY(Fernet)와 Notion·GitHub 토큰은 네가 만들 수 없다.
-   AUTORUN §3.3 이다 — 시작하자마자 요청하고, 기다리는 동안 키가 필요 없는
-   모델·마이그레이션·스키마부터 해라.
-⚠️ 토큰이 DB 에 평문으로 저장되지 않는 것을 테스트로 확인한다 (완료 기준).
-⚠️ 알림 타입·SSE 이벤트는 닫힌 집합이다. tests/test_notification_contract.py 가
-   04 §4 와 05 §12.3 을 정규식으로 파싱해 막는다.
+⚠️ 시드는 카드 상세(GET /review-cards/{id})를 호출하지 않는다 —
+   first_viewed_at 이 오염되면 card_handle_30s_rate 가 무의미해진다.
+⚠️ Q1·Q8·Q10 원문은 이력에 소진하지 않는다 (09 §2의 제외 목록·어서션).
+⚠️ --with-history 는 실 LLM 이 아니라 FakeLLM 으로 돌릴지 먼저 확인해라.
+   실 API 로 45~60건이면 비용이 발생한다 (AUTORUN §3.3).
 
-M8 DoD를 하나씩 확인하고, 통과하면 커밋하고, START-HERE.md 세션표를 갱신한 뒤
-보고하고 멈춰줘. 다음은 M9 시드다(새 세션).
+M9 시드 DoD를 하나씩 확인하고, 통과하면 커밋하고, START-HERE.md 세션표를 갱신한 뒤
+보고하고 멈춰줘. 다음은 클라우드 배포·리허설이다(새 세션).
 ```
 
 > 이후 마일스톤도 같은 형태다 — `@prompts/AUTORUN.md @prompts/01-auth-projects.md` 처럼

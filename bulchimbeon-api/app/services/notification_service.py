@@ -41,6 +41,8 @@ from app.models.notification import (
     NOTIFICATION_CARD_CREATED,
     NOTIFICATION_DOC_REVIEW_NEEDED,
     NOTIFICATION_FEEDBACK_DIFFERENT,
+    NOTIFICATION_SYNC_COMPLETED,
+    NOTIFICATION_SYNC_FAILED,
     Notification,
 )
 from app.models.project import Project
@@ -158,6 +160,22 @@ _TITLE_BRIEFING_READY = {"ko": "오늘의 브리핑이 준비됐습니다", "en"
 _BODY_BRIEFING_READY = {
     "ko": "확인이 필요한 항목을 모아 두었습니다.",
     "en": "We have gathered the items that need your review.",
+}
+_TITLE_SYNC_COMPLETED = {"ko": "연동 동기화가 끝났습니다", "en": "Sync finished"}
+_BODY_SYNC_COMPLETED = {
+    "ko": "{provider} 에서 새 문서 {new_documents}건, 새 버전 {new_versions}건을 가져왔습니다.",
+    "en": (
+        "Imported {new_documents} new document(s) and {new_versions} new version(s) "
+        "from {provider}."
+    ),
+}
+_TITLE_SYNC_FAILED = {"ko": "연동 동기화에 실패했습니다", "en": "Sync failed"}
+# 실패 **원인**은 붙이지 않는다 — 예외 문자열에는 토큰·레포 경로·내부 경로가 섞여 들어오고
+# (`03 §7` 내부 정보 노출 금지, `pipeline/ingest._user_facing_error` 와 같은 판단),
+# 알림은 푸시 한 줄이다. 상세는 `sync.run` 이벤트 payload 의 `failed[]` 에 남는다.
+_BODY_SYNC_FAILED = {
+    "ko": "{provider} 동기화를 마치지 못했습니다. 연동 설정을 확인해 주세요.",
+    "en": "The {provider} sync could not be completed. Please check the integration settings.",
 }
 
 
@@ -515,6 +533,52 @@ async def notify_feedback_different(
         deliver_after=await answerer_deliver_after(
             db, project=project, immediate=question.urgency == "urgent"
         ),
+    )
+
+
+async def notify_sync_result(
+    db: AsyncSession,
+    *,
+    project: Project,
+    integration_id: UUID,
+    provider: str,
+    succeeded: bool,
+    new_documents: int,
+    new_versions: int,
+) -> Notification | None:
+    """`sync.completed` / `sync.failed` (담당자) — 연동 동기화 결과 (`04 §4`, `05 §5`).
+
+    동기화는 담당자 본인이 누른 액션이므로 즉시 발송 대상이고, DND 구간이면 함께 보류된다
+    (룰 6) — `answer.corrected` 의 담당자 쪽 한 건과 같은 취급이다.
+
+    ⚠️ **SSE `sync.completed` 는 여기서 내지 않는다.** 알림 레코드는 룰 6 의 보류 규칙을 따르지만
+    SSE 는 "방금 누른 버튼이 끝났다"는 진행 신호라서 시각대와 무관하게 나가야 한다 — 호출부
+    (`services/sync/runner.py`)가 직접 발행하며, `document.ingested`(M2)가 같은 이유로 인제스트
+    성패와 무관하게 발행되는 것과 같은 판단이다. 여기서 보류하면 담당자 화면이 영원히 돈다.
+    """
+    if project.answerer_id is None:
+        return None
+
+    language = await _language(db, project.answerer_id)
+    title_table = _TITLE_SYNC_COMPLETED if succeeded else _TITLE_SYNC_FAILED
+    body_table = _BODY_SYNC_COMPLETED if succeeded else _BODY_SYNC_FAILED
+
+    return await create(
+        db,
+        user_id=project.answerer_id,
+        project_id=project.id,
+        type=NOTIFICATION_SYNC_COMPLETED if succeeded else NOTIFICATION_SYNC_FAILED,
+        title=_localized(title_table, language),
+        body=_localized(body_table, language).format(
+            provider=provider, new_documents=new_documents, new_versions=new_versions
+        ),
+        payload={
+            "project_id": str(project.id),
+            "integration_id": str(integration_id),
+            "new_documents": new_documents,
+            "new_versions": new_versions,
+        },
+        deliver_after=await answerer_deliver_after(db, project=project, immediate=True),
     )
 
 

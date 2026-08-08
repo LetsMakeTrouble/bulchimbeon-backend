@@ -5,6 +5,18 @@
 - 세션 스코프에서 테스트 DB 생성 → `CREATE EXTENSION vector` → `Base.metadata.create_all`.
 - **테스트별 격리는 트랜잭션 롤백**이다. 테스트마다 DROP/CREATE 하지 않는다 —
   느리고 HNSW 인덱스 재생성 비용이 크다.
+
+> ### ⚠️ 기존 테이블에 제약·인덱스를 **추가**했다면 테스트 DB 를 한 번 지워야 한다 (M8 실측)
+> `Base.metadata.create_all` 은 테이블 단위로 `checkfirst` 한다. 테이블이 이미 있으면 통째로
+> 건너뛰므로 **새 인덱스가 반영되지 않는다** — 새 테이블 추가는 멀쩡히 반영되기 때문에
+> 눈치채기 어렵다. 그 상태에서는 제약을 검증하는 테스트가 "제약이 없어서" 실패하고,
+> 반대로 제약에 기대는 코드가 통과해 버릴 수도 있다.
+>
+>     uv run python -c "import asyncio; from app.config import settings; \\
+>       from tests.conftest import drop_database; \\
+>       asyncio.run(drop_database(settings.test_database_url))"
+>
+> 마이그레이션 자체는 `test_migrations.py` 가 별도 스크래치 DB 에서 검증하므로 영향이 없다.
 """
 
 from collections.abc import AsyncIterator, Iterator
@@ -24,6 +36,7 @@ from app.services import llm, sse_manager, sse_stream_service, sse_ticket_servic
 from app.services.llm.fake_provider import FakeLLMProvider
 from app.services.pipeline import answer as answer_pipeline
 from app.services.pipeline import ingest, quota
+from app.services.sync import runner as sync_runner
 
 # ⚠️ `Base.metadata.create_all` 이 테이블을 만들려면 모델이 먼저 등록돼 있어야 한다.
 # 빠뜨리면 테이블 없이 테스트가 돌다가 엉뚱한 곳에서 터진다 (또는 조용히 초록이다).
@@ -193,10 +206,12 @@ async def task_session_factory(db_connection: AsyncConnection) -> AsyncIterator[
         ingest.session_factory,
         answer_pipeline.session_factory,
         sse_stream_service.session_factory,
+        sync_runner.session_factory,
     )
     ingest.session_factory = factory
     answer_pipeline.session_factory = factory
     sse_stream_service.session_factory = factory
+    sync_runner.session_factory = factory
     try:
         yield
     finally:
@@ -204,6 +219,7 @@ async def task_session_factory(db_connection: AsyncConnection) -> AsyncIterator[
             ingest.session_factory,
             answer_pipeline.session_factory,
             sse_stream_service.session_factory,
+            sync_runner.session_factory,
         ) = originals
 
 

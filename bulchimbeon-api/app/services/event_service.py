@@ -61,6 +61,18 @@ EVENT_LESSON_CANDIDATE = "lesson.candidate"
 EVENT_LESSON_APPROVED = "lesson.approved"
 EVENT_LESSON_DELETED = "lesson.deleted"
 
+# M8 외부 연동 (`04 §5` 의 마지막 타입).
+#
+# ⚠️ **연동 스코프**다 — 질문 스코프 규약의 예외이며, 문서 스코프 둘과 같은 이유다:
+#    한 번의 동기화가 여러 문서·여러 질문에 걸치므로 질문에 붙일 수 없다.
+#    `05 §13` 의 `?entity_type=integration&entity_id=…` 로 그 연동의 이력만 뽑힌다.
+#
+# payload 는 `{provider, new_documents, new_versions, scanned, status, failed: [...]}` 다.
+# `04 §5` 가 이 타입의 payload 를 규정하지 않은 지점이라 **사용자 결정 2026-08-08** 로
+# 정했다: 동기화 결과와 실패 목록은 `integrations` 컬럼이 아니라 여기 남긴다
+# (`08 §6` "실패 목록을 status payload 에", 룰 4 "events 가 단일 원천").
+EVENT_SYNC_RUN = "sync.run"
+
 ENTITY_QUESTION = "question"
 # ⚠️ **쓰지 마라.** 답변·카드·교훈·공식 Q&A 이벤트는 전부 `ENTITY_QUESTION` 스코프다 —
 #    `05 §13` 타임라인 조회가 `?entity_type=question&entity_id=q-9` 이고 "질문의 전체 여정이
@@ -69,6 +81,7 @@ ENTITY_QUESTION = "question"
 ENTITY_ANSWER = "answer"
 ENTITY_DOCUMENT = "document"
 ENTITY_DOCUMENT_VERSION = "document_version"
+ENTITY_INTEGRATION = "integration"
 
 # `05 §13` 타임라인 기본 조회 건수. §1.2 페이지네이션 봉투(20)가 아니다 — 질문 하나의 여정은
 # 접수·등급·상태전이·카드·피드백·확정으로 10~15건이라 20 에서 잘리면 앞부분이 사라진다.

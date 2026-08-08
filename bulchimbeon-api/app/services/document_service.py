@@ -193,7 +193,18 @@ def _resolve_mime(filename: str | None) -> tuple[str, str]:
     return suffix, mime
 
 
-def _safe_filename(filename: str | None, suffix: str) -> str:
+def safe_filename(filename: str | None, suffix: str) -> str:
+    """저장용 파일명. 업로드(사용자 입력)와 동기화(원격 경로) 양쪽이 같은 규칙을 쓴다 (`03 §7`).
+
+    ⚠️ **디렉터리는 치환되는 게 아니라 통째로 버려진다** — `Path(...).stem` 이 먼저 걸러내기
+    때문이다. `docs/policy/refund.md` → `refund.md`, `../../etc/passwd.md` → `passwd.md`.
+    경로 탈출이 막히는 근거가 여기이고, 남은 문자열에 대한 화이트리스트 치환은 그 뒤의 2차
+    방어다.
+
+    그래서 서로 다른 디렉터리의 `README.md` 두 개가 같은 파일명이 되지만 충돌하지 않는다 —
+    저장 위치가 `STORAGE_DIR/{project_id}/{version_id}/` 로 버전마다 갈리기 때문이다
+    (`_store`). 문서를 구분하는 것은 파일명이 아니라 `source_ref` 다 (`04 §2`).
+    """
     stem = Path(filename or "").stem
     stem = _UNSAFE_FILENAME_CHARS.sub("_", stem).strip(" ._")[:_MAX_FILENAME_STEM]
     return f"{stem or 'document'}{suffix}"
@@ -251,6 +262,47 @@ async def _next_version_no(db: AsyncSession, document_id: UUID) -> int:
     return (current or 0) + 1
 
 
+async def create_version_from_bytes(
+    db: AsyncSession,
+    *,
+    document: Document,
+    uploaded_by: UUID,
+    filename: str,
+    mime: str,
+    payload: bytes,
+) -> DocumentVersion:
+    """버전 행을 만드는 **유일한 구현**. 업로드(`create_version`)와 동기화(M8)가 함께 쓴다.
+
+    `uploaded_by` 가 `User` 가 아니라 UUID 인 이유는 `activate_version` 과 같다 — 동기화는
+    백그라운드에서 돌고 그쪽에는 ORM 유저 객체가 없다 (`03 §2` 원칙 4).
+
+    ⚠️ **여기서도 활성화하지 않는다.** 활성 전환은 인제스트가 `ready` 에 도달한 뒤
+    `pipeline/ingest.py` 가 한다 (`create_version` 독스트링의 근거가 그대로 적용된다).
+    """
+    version_id = uuid4()
+    storage_path = await _store(document.project_id, version_id, filename, payload)
+
+    # 상위 행 잠금 — 동시 재업로드·동기화가 같은 `version_no` 를 계산하는 것을 막는다.
+    await db.execute(select(Document.id).where(Document.id == document.id).with_for_update())
+
+    version = DocumentVersion(
+        id=version_id,
+        document_id=document.id,
+        version_no=await _next_version_no(db, document.id),
+        original_filename=filename,
+        mime=mime,
+        storage_path=storage_path,
+        is_active=False,  # 활성화는 반드시 activate_version 의 3문 절차를 거친다 (`04 §7`).
+        uploaded_by=uploaded_by,
+    )
+    db.add(version)
+    await db.flush()
+    # `created_at`·`ingest_status` 는 server_default 다 — 응답 스키마가 바로 읽으므로
+    # 값이 채워진 상태로 만들어 둔다.
+    await db.refresh(version)
+    return version
+
+
 async def create_version(
     db: AsyncSession,
     *,
@@ -274,29 +326,64 @@ async def create_version(
     suffix, mime = _resolve_mime(file.filename)
     payload = await _read_capped(file)
 
-    version_id = uuid4()
-    filename = _safe_filename(file.filename, suffix)
-    storage_path = await _store(document.project_id, version_id, filename, payload)
-
-    # 상위 행 잠금 — 동시 재업로드가 같은 `version_no` 를 계산하는 것을 막는다.
-    await db.execute(select(Document.id).where(Document.id == document.id).with_for_update())
-
-    version = DocumentVersion(
-        id=version_id,
-        document_id=document.id,
-        version_no=await _next_version_no(db, document.id),
-        original_filename=filename,
-        mime=mime,
-        storage_path=storage_path,
-        is_active=False,  # 활성화는 반드시 activate_version 의 3문 절차를 거친다 (`04 §7`).
+    return await create_version_from_bytes(
+        db,
+        document=document,
         uploaded_by=uploader.id,
+        filename=safe_filename(file.filename, suffix),
+        mime=mime,
+        payload=payload,
     )
-    db.add(version)
-    await db.flush()
-    # `created_at`·`ingest_status` 는 server_default 다 — 응답 스키마가 바로 읽으므로
-    # 값이 채워진 상태로 만들어 둔다.
-    await db.refresh(version)
-    return version
+
+
+async def ensure_document_capacity(db: AsyncSession, project_id: UUID) -> None:
+    """프로젝트당 문서 상한 (`03 §7` — 100개).
+
+    업로드와 동기화(M8)가 같은 관문을 지난다. 동기화만 예외로 두면 연동 하나가 프로젝트를
+    수백 개 문서로 채워 검색 품질과 임베딩 비용을 통째로 망가뜨린다.
+    """
+    active_documents = await db.scalar(
+        select(func.count())
+        .select_from(Document)
+        .where(Document.project_id == project_id, Document.status == DOCUMENT_STATUS_ACTIVE)
+    )
+    if (active_documents or 0) >= MAX_DOCUMENTS_PER_PROJECT:
+        raise ValidationError(
+            f"프로젝트당 문서는 최대 {MAX_DOCUMENTS_PER_PROJECT}개입니다 (`03 §7`)."
+        )
+
+
+async def find_by_source_ref(
+    db: AsyncSession, *, project_id: UUID, source_type: str, source_ref: str
+) -> Document | None:
+    """외부 원본 식별자로 문서를 찾는다 (M8).
+
+    `source_ref` 는 github 이 `owner/repo:path`, notion 이 page_id 다 (`04 §2`).
+    삭제된 문서(D20)도 함께 찾는다 — 담당자가 지운 문서를 동기화가 새 문서로 되살리면
+    "지웠는데 다시 생긴다"가 되고, 그 판단은 담당자 몫이다 (`sync/runner.py` 가 건너뛴다).
+    """
+    return await db.scalar(
+        select(Document).where(
+            Document.project_id == project_id,
+            Document.source_type == source_type,
+            Document.source_ref == source_ref,
+        )
+    )
+
+
+async def latest_version(db: AsyncSession, document_id: UUID) -> DocumentVersion | None:
+    """가장 최근 버전(활성 여부 무관). 동기화의 변경 감지 기준점이다 (M8).
+
+    ⚠️ **활성 버전이 아니라 최신 버전**이다 — 직전 동기화가 가져온 버전의 인제스트가 실패하면
+    그 버전은 활성이 되지 못하는데(`02 §5` 구현 노트), 활성 버전을 기준으로 비교하면 같은
+    내용을 매 동기화마다 새 버전으로 다시 만든다.
+    """
+    return await db.scalar(
+        select(DocumentVersion)
+        .where(DocumentVersion.document_id == document_id)
+        .order_by(DocumentVersion.version_no.desc())
+        .limit(1)
+    )
 
 
 async def create_document(
@@ -309,15 +396,7 @@ async def create_document(
     auto_activate: bool,
 ) -> tuple[Document, DocumentVersion]:
     """업로드 → 문서 + 버전 1 (`05 §4`). 인제스트는 라우터가 백그라운드로 띄운다."""
-    active_documents = await db.scalar(
-        select(func.count())
-        .select_from(Document)
-        .where(Document.project_id == project_id, Document.status == DOCUMENT_STATUS_ACTIVE)
-    )
-    if (active_documents or 0) >= MAX_DOCUMENTS_PER_PROJECT:
-        raise ValidationError(
-            f"프로젝트당 문서는 최대 {MAX_DOCUMENTS_PER_PROJECT}개입니다 (`03 §7`)."
-        )
+    await ensure_document_capacity(db, project_id)
 
     document = Document(
         project_id=project_id,
@@ -332,6 +411,47 @@ async def create_document(
 
     version = await create_version(
         db, document=document, uploader=uploader, file=file, auto_activate=auto_activate
+    )
+    return document, version
+
+
+async def create_synced_document(
+    db: AsyncSession,
+    *,
+    project_id: UUID,
+    source_type: str,
+    source_ref: str,
+    title: str,
+    uploaded_by: UUID,
+    filename: str,
+    mime: str,
+    payload: bytes,
+) -> tuple[Document, DocumentVersion]:
+    """외부 원본에서 온 새 문서 + 버전 1 (M8, `05 §5` "신규 파일 → 새 문서").
+
+    업로드 경로와 다른 것은 `source_type`·`source_ref` 뿐이다 — 인제스트·활성화·재검토 연쇄는
+    호출부가 `run_ingest` 를 그대로 태우므로 룰 5 가 같은 코드로 적용된다 (`08 §3`).
+    """
+    await ensure_document_capacity(db, project_id)
+
+    document = Document(
+        project_id=project_id,
+        title=title.strip() or source_ref,
+        source_type=source_type,
+        source_ref=source_ref,
+        status=DOCUMENT_STATUS_ACTIVE,
+    )
+    db.add(document)
+    await db.flush()
+    await db.refresh(document)
+
+    version = await create_version_from_bytes(
+        db,
+        document=document,
+        uploaded_by=uploaded_by,
+        filename=filename,
+        mime=mime,
+        payload=payload,
     )
     return document, version
 

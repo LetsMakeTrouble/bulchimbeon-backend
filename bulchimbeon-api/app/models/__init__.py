@@ -12,6 +12,7 @@
 from app.models.briefing_run import BriefingRun
 from app.models.document import Chunk, Document, DocumentVersion
 from app.models.event import Event
+from app.models.integration import Integration
 from app.models.lesson import Lesson
 from app.models.notification import Notification
 from app.models.official_qa import OfficialQA
@@ -30,6 +31,7 @@ __all__ = [
     "Event",
     "Feedback",
     "Guideline",
+    "Integration",
     "Lesson",
     "Notification",
     "OfficialQA",

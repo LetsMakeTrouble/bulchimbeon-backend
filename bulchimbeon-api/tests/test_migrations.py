@@ -57,21 +57,40 @@ async def _table_names(engine: AsyncEngine) -> set[str]:
 
 
 async def _schema_snapshot(engine: AsyncEngine) -> set[tuple[str, ...]]:
-    """컬럼 단위 스키마 지문 — 테이블·컬럼·타입·NULL 허용·**기본값**까지 본다.
+    """스키마 지문 — 컬럼(타입·NULL 허용·**기본값**)과 **인덱스 정의**를 함께 본다.
 
     기본값을 넣는 이유는 0008 처럼 DDL 을 만들지 않고 `server_default` 만 바꾸는 리비전이
     있기 때문이다. 테이블 목록만 보면 그런 리비전의 `downgrade()` 는 검증되지 않는다.
-    `alembic_version` 은 리비전 이동 그 자체라 제외한다.
+
+    ⚠️ **인덱스를 넣는 이유는 같은 종류의 구멍이 하나 더 있었기 때문이다** (M8 실측).
+    0010 처럼 **인덱스만 추가하는 리비전**은 `information_schema.columns` 가 그대로라
+    왕복 검증이 "아무것도 되돌리지 않았다"로 잘못 실패한다 — 실제로는 `downgrade()` 가
+    멀쩡히 도는데도 그렇다. 반대 방향의 위험이 더 크다: `drop_index` 를 빠뜨린
+    `downgrade()` 가 초록으로 지나가고, 그 사실은 롤백이 필요한 순간에야 드러난다.
+    `pg_indexes.indexdef` 는 부분 인덱스의 `WHERE` 절까지 문자열로 담으므로
+    `uq_documents_source_ref` 같은 부분 UNIQUE 도 그대로 비교된다.
+
+    `alembic_version` 은 리비전 이동 그 자체라 양쪽에서 제외한다.
     """
     async with engine.connect() as conn:
-        rows = await conn.execute(
+        columns = await conn.execute(
             text(
-                "SELECT table_name, column_name, data_type, is_nullable, column_default "
+                "SELECT 'column', table_name, column_name, data_type, is_nullable, column_default "
                 "FROM information_schema.columns "
                 "WHERE table_schema = 'public' AND table_name <> 'alembic_version'"
             )
         )
-        return {tuple("" if value is None else str(value) for value in row) for row in rows}
+        indexes = await conn.execute(
+            text(
+                "SELECT 'index', tablename, indexname, indexdef, '', '' "
+                "FROM pg_indexes "
+                "WHERE schemaname = 'public' AND tablename <> 'alembic_version'"
+            )
+        )
+        return {
+            tuple("" if value is None else str(value) for value in row)
+            for row in [*columns, *indexes]
+        }
 
 
 @pytest.mark.slow
@@ -135,10 +154,11 @@ async def test_head_revision_downgrades_and_upgrades_back() -> None:
     `upgrade()` 만 보고 넘어가면 drop 을 빠뜨린 `downgrade()` 가 초록으로 지나간다. 그 실패는
     롤백이 필요한 순간 — 배포가 이미 깨진 뒤 — 에야 드러나므로 여기서 왕복시켜 확인한다.
 
-    ⚠️ **테이블 목록이 아니라 스키마 스냅숏을 비교한다** (M7). head 가 테이블을 만드는
-    리비전일 때만 테이블 목록으로 확인이 되는데, 기본값·타입만 바꾸는 리비전(0008 이 그렇다)은
-    테이블 목록이 그대로라 아무것도 검증하지 못한 채 초록이 된다. `information_schema.columns`
-    를 통째로 비교하면 어느 종류의 리비전이 head 여도 왕복이 확인된다.
+    ⚠️ **테이블 목록이 아니라 스키마 스냅숏을 비교한다** (M7·M8). head 가 테이블을 만드는
+    리비전일 때만 테이블 목록으로 확인이 되는데, 기본값·타입만 바꾸는 리비전(0008)이나
+    인덱스만 추가하는 리비전(0010)은 테이블 목록이 그대로라 아무것도 검증하지 못한 채 초록이
+    된다. 스냅숏이 컬럼과 인덱스를 모두 담으므로 어느 종류의 리비전이 head 여도 왕복이
+    확인된다 — 근거는 `_schema_snapshot` 독스트링.
     """
     url = _scratch_url(ROUNDTRIP_DATABASE)
 

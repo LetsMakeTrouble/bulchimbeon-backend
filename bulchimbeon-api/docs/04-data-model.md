@@ -218,7 +218,10 @@ erDiagram
 | provider | text | `notion` \| `github` |
 | config | jsonb | 토큰은 Fernet 암호화 문자열로 저장 |
 | last_synced_at | timestamptz NULL | |
-| last_sync_status | text NULL | `ok` \| `failed` + 에러 메시지 payload |
+| last_sync_status | text NULL | `ok` \| `failed` 두 값만 (CHECK). **에러 메시지·실패 목록은 여기 두지 않는다** — `sync.run` 이벤트의 payload가 단일 원천이다 (룰 4, **사용자 결정 2026-08-08**). 조회는 `05 §13` `?entity_type=integration&entity_id=…` |
+
+- `last_sync_status`는 **실행 단위 판정**이다. 파일 하나가 실패해도 나머지가 들어왔으면 `ok`이며(실패 격리, `08 §6`), 열거 자체가 실패했거나 시도한 것이 전부 실패했을 때만 `failed`다.
+- 마지막으로 본 파일 sha·편집 시각을 담는 **커서 컬럼을 두지 않는다.** GitHub은 저장된 파일에서 blob sha를 다시 계산하고 Notion은 최신 버전의 `created_at`과 비교한다 — 커서를 따로 들면 문서를 지우거나 되돌렸을 때 커서만 앞서 나가 "바뀌었는데 안 가져온다"가 조용히 생긴다.
 
 ## 3. projects.settings 스키마 (기본값)
 
@@ -279,6 +282,7 @@ erDiagram
 - `answer.reuse_missed`: 재사용 후보를 찾았으나 임계값 미달(또는 LLM 동일성 게이트 `no`)로 재사용하지 않고 새로 생성한 경우. **재질문 즉답률의 분모**를 만든다 (D26).
 - `question.status_changed`: §6.1의 모든 전이에서 발행. `held → answered`(카드 확정) 추적의 단일 원천.
 - `answer-option` 확정은 `05 §7.2`에 따라 `edit`과 동일 처리이므로 `card.edited`(payload에 `selected_option_index`)로 기록한다.
+- `sync.run`: 연동 동기화 1회의 결과. **`entity_type='integration'`** 이며(질문 스코프 규약의 예외 — 한 번의 동기화가 여러 문서에 걸친다) payload는 `{provider, status, scanned, new_documents, new_versions, unchanged, skipped, repaired, restored, failed[]}`다. 열거 자체가 실패하면 `fatal`이 붙는다. **`failed[]`가 실패 파일 목록이 사는 유일한 곳**이다 (`08 §6`, 사용자 결정 2026-08-08).
 - **등급 산출 증적**: `question.graded`의 `payload`에는 `S_raw`(= `sim_raw`) · `S`(리스케일 후) · `G_raw`(프루닝 전) · `G_final` · `removed_sentences`(무근거로 제거된 문장)를 **전부 기록**한다. 환각 방어 2겹의 증적이며 캘리브레이션 재산출 근거다.
 
 | 지표 | 계산 |
@@ -344,6 +348,9 @@ stateDiagram-v2
   - 근거 검색(`06 §2` ③)은 `chunks`만 대상으로 한다(D24). `official_qas.question_embedding`은 `06 §2` ②의 재사용·유사 첨부 판정에만 쓰며, **두 인덱스를 하나의 랭킹으로 병합하지 않는다.**
 - `answers`: **UNIQUE `(question_id)`** — 질문당 1행. MVP는 답변 재생성 API를 제공하지 않는다(§6.1).
 - `document_versions`: 부분 UNIQUE `(document_id) WHERE is_active` — 활성 버전 1개 강제
+- `documents`: 부분 UNIQUE `(project_id, source_type, source_ref) WHERE source_ref IS NOT NULL` — 외부 원본 1개 = 문서 1개 (**사용자 결정 2026-08-08**, M8). 업로드 문서는 `source_ref`가 NULL이라 대상 밖이다.
+  - 동기화는 "이미 있나?"를 조회한 뒤 INSERT하는데, 담당자가 동기화를 연달아 트리거하면 두 실행이 조회와 INSERT 사이에서 겹쳐 **같은 파일이 문서 두 개**가 된다. 그 뒤로는 한쪽만 갱신되고 다른 쪽이 낡은 내용으로 활성 상태를 유지해 검색에 계속 잡힌다 — 룰 6("근거 문서 내용만")이 낡은 근거를 인용하는 형태로 조용히 깨진다.
+  - **락이 아니라 제약으로 막는다** — `briefing_runs`의 중복 발송 방지(결정 1.11)와 같은 방식이다. 동기화는 네트워크 호출을 세션 밖에서 하므로 조회~INSERT 구간에 락을 걸면 원격 응답을 기다리는 동안 커넥션을 붙잡게 된다. 충돌한 쪽은 `IntegrityError`를 받고 **새 문서가 아니라 새 버전 경로로 재시도**한다(내용이 같으면 아무것도 만들지 않는다).
 - `review_cards`: `(project_id, status)`, `events`: `(project_id, created_at)`, `notifications`: `(user_id, read_at)`
   - 브리핑 조회는 `notifications(user_id, deliver_after)`도 함께 탄다.
 - `feedbacks`: **UNIQUE `(answer_id, user_id)`** — 유저당 1건. 재제출은 409이며 verdict 변경은 지원하지 않는다 (D12).

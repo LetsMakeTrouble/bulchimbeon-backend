@@ -56,6 +56,19 @@ class Document(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "source_type IN ('upload', 'notion', 'github')", name="ck_documents_source_type"
         ),
         CheckConstraint("status IN ('active', 'deleted')", name="ck_documents_status"),
+        # 외부 원본 1개 = 문서 1개 (`04 §7`, 사용자 결정 2026-08-08).
+        # 동기화가 "이미 있나?" 조회와 INSERT 사이에서 겹치면 같은 파일이 문서 두 벌이 되고,
+        # 그 뒤로는 한쪽만 갱신돼 다른 쪽이 **낡은 근거로 활성 상태를 유지**한다.
+        # 락이 아니라 제약으로 막는다 — `briefing_runs` 의 중복 발송 방지와 같은 방식이다.
+        # 업로드 문서는 `source_ref` 가 NULL 이라 대상 밖이다.
+        Index(
+            "uq_documents_source_ref",
+            "project_id",
+            "source_type",
+            "source_ref",
+            unique=True,
+            postgresql_where=text("source_ref IS NOT NULL"),
+        ),
     )
 
     project_id: Mapped[uuid.UUID] = mapped_column(

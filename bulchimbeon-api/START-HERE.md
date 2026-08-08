@@ -32,13 +32,26 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 | 4~5 | **M3 질문 파이프라인** ⭐ — **✅ 완료 2026-08-08** | ~~`@prompts/03-question-pipeline.md`~~ DoD 7/7, `feat(M3): question answering pipeline with grading` | ⛔ 불가 |
 | 6 | **M4 확인 워크플로** ⭐ — **✅ 완료 2026-08-08** | ~~`@prompts/04-review-workflow.md`~~ DoD 통과, `feat(M4): review workflow and knowledge loop` | ⛔ 불가 |
 | 7 | M5 알림·SSE — **✅ 완료 2026-08-08** | ~~`@prompts/05-notifications-sse.md`~~ DoD 6/6, `feat(M5): notifications, sse, expiry sweeper` | 컷 없음(전 범위) |
-| 8 | **클라우드 배포 1차** | `@prompts/09-seed-deploy.md 의 배포 부분만 먼저 실행해줘` | ⛔ 불가 |
-| 9 | M6 브리핑·교훈 | `@prompts/06-briefing-lessons.md 실행해줘` | 스케줄러·교훈 컷 가능 |
-| 10 | M7 지표 | `@prompts/07-metrics-events.md 실행해줘` | 2종만 남기고 컷 가능 |
-| 11 | M9 시드·리허설 | `@prompts/09-seed-deploy.md 실행해줘` | ⛔ 시드는 불가 |
-| — | M8 외부 연동 | `@prompts/08-integrations.md 실행해줘` | **기본 제외** (여유 시만) |
+| 8 | M6 브리핑·교훈 | `@prompts/06-briefing-lessons.md 실행해줘` | 컷 없음(전 범위) |
+| 9 | M7 지표 | `@prompts/07-metrics-events.md 실행해줘` | 컷 없음(4종+정확도) |
+| 10 | M8 외부 연동 | `@prompts/08-integrations.md 실행해줘` | 컷 없음 (AUTORUN §1) |
+| 11 | M9 시드 | `@prompts/09-seed-deploy.md 의 시드 부분` | ⛔ 시드는 불가 |
+| 12 | **클라우드 배포 + 리허설** | `@prompts/09-seed-deploy.md 의 배포·리허설 부분` | ⛔ 불가 |
 
-**배포를 8번째 세션(6일차)로 앞당긴 것이 의도다.** Railway pgvector extension 권한·마이그레이션·SSE 프록시 같은 외부 마찰을 하루 먼저 노출시켜 복구 시간을 확보한다.
+> ### ⚠️ 배포 순서를 바꿨다 (**사용자 결정 2026-08-08**)
+> **원래 계획은 배포를 6일차(M5 직후)로 앞당기는 것이었다.** `07 §일정`이 그렇게 배치한 근거는
+> "Railway pgvector extension 권한·마이그레이션·SSE 프록시 같은 **외부 마찰은 코드로 해결되지
+> 않으므로** 하루 먼저 노출시켜 복구 시간을 확보한다"였다. 사용자 지시로 **개발을 먼저 완주하고
+> 배포를 마지막에** 두기로 바꿨다. `07 §일정`은 그대로 두었다 — 사양이 아니라 일정 권고이고,
+> 되돌릴 때 원래 근거가 남아 있어야 한다.
+>
+> **그래서 마지막 세션이 가장 위험하다.** 가장 큰 미지수였던 `CREATE EXTENSION vector` 권한은
+> M-1에서 실측 검증됐지만(`03 §6`), 남은 것들은 **아직 한 번도 실행되지 않았다**:
+> - SSE가 프록시를 통과하는지 (Railway는 15분에 강제 종료 — 정상 동작이지만 확인은 필요하다)
+> - `STORAGE_DIR` 볼륨이 재시작을 넘어 살아남는지 (업로드 파일이 사라지면 근거 검색이 비어 버린다)
+> - 시작 커맨드의 `--workers 1` 고정과 `alembic upgrade head` 선행
+>
+> 배포 세션을 데모 **전날 이전**에 잡는다. 당일에 잡으면 복구 시간이 0이다.
 
 ---
 
@@ -88,24 +101,35 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 > access token 으로 서버가 스스로 끊게 만들어 검증한다.
 
 ```
-@prompts/AUTORUN.md @prompts/09-seed-deploy.md
+@prompts/AUTORUN.md @prompts/06-briefing-lessons.md
+
+두 문서를 읽고 M6 브리핑·교훈을 실행해줘.
 
 AUTORUN.md가 실행 규약이다. 특히 §3 "반드시 질문해야 하는 상황"을 지켜줘 —
-특히 §3.3(외부 계정·비가역 작업)이 이번 세션의 핵심이다. 배포는 되돌리기 어렵고
-Railway 계정·환경변수 설정이 필요하니 실행 전에 확인받아라.
+사양이 갈리거나, 실측이 문서를 뒤집거나, DoD가 안 닫히거나, 스코프가 애매하면
+추측하지 말고 AskUserQuestion으로 물어봐. 반대로 §4에 있는 것들(문서에 답이
+있는 것, 관례적 판단)은 묻지 말고 그냥 진행해.
 
-09-seed-deploy.md 중 **배포 부분만 먼저** 실행해줘. 시드(scripts/seed.py)는 M9 세션이다.
+⚠️ 06-briefing-lessons.md 상단의 ✂️ 컷라인은 **적용하지 않는다.** 데드라인이
+없으므로 교훈 메모리와 브리핑 스케줄러를 전부 구현한다 (AUTORUN §1).
 
-M0~M5는 끝났다. 마이그레이션 head는 0006이고 pytest 316 passed다.
-배포에서 특별히 확인할 것:
-- Railway Postgres에 CREATE EXTENSION vector (M-1에서 권한 확인됨, 03 §6)
-- 시작 커맨드에 --workers 1 고정 (SSE 인메모리 큐 + APScheduler 중복 발화)
-- alembic upgrade head 선행
-- SSE 프록시 통과 확인 — Railway는 15분에 강제 종료한다(정상 동작, 05 §12.2)
-- STORAGE_DIR는 컨테이너 내 절대 경로
+M0~M5는 끝났다. 마이그레이션 head는 0006, pytest 316 passed다.
+M5가 남겨 둔 접점 (다시 만들지 마라):
+- 브리핑 시각 계산은 dnd.next_briefing_at 을 써라. defer 기본 만기(D15)와
+  알림 보류가 이미 이 함수를 쓴다 — 세 곳이 어긋나면 담당자 교체 시 깨진다.
+- briefing.ready 발행은 sse_manager.queue_briefing_ready 가 이미 있다(호출부만 없다).
+- 보류 알림 flush 대상은 notifications.deliver_after <= now() 다.
+- 잡 등록은 core/scheduler.py 에 더한다(만료 스위퍼·좀비 회수가 이미 있다).
+- 교훈 후보 자리는 grep -rn "TODO(M6)" app/ 로 3곳이 나온다.
 
-끝나면 클라우드 URL에서 /health와 /docs를 확인하고, START-HERE.md 세션표를
-갱신한 뒤 보고하고 멈춰줘. 다음은 M6 브리핑·교훈이다(새 세션).
+⚠️ 브리핑 중복 발송은 락이 아니라 제약으로 막는다 — briefing_runs 의
+   UNIQUE(project_id, run_date) + ON CONFLICT DO NOTHING → rowcount==1 일 때만 발송.
+⚠️ 🟢 카드는 큐에는 있고 브리핑에는 없다. correct 2건 후에만 recommend_approve[]에
+   올라온다 — 큐와 브리핑의 필터가 다르다는 것이 이 마일스톤의 핵심이다.
+⚠️ SSE 발행은 sse_manager.enqueue(아웃박스)를 쓴다. 커밋 후 직접 publish 하지 마라.
+
+M6 DoD를 하나씩 확인하고, 통과하면 커밋하고, START-HERE.md 세션표를 갱신한 뒤
+보고하고 멈춰줘. 다음은 M7 지표다(새 세션).
 ```
 
 > 이후 마일스톤도 같은 형태다 — `@prompts/AUTORUN.md @prompts/01-auth-projects.md` 처럼

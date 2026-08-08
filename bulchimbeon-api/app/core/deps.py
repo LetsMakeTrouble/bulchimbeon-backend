@@ -17,6 +17,7 @@ from app.core.errors import ForbiddenRole, NotFound, NotMember, Unauthorized
 from app.core.security import ACCESS_TOKEN_TYPE, decode_token
 from app.database import get_db
 from app.models.document import Document
+from app.models.official_qa import OfficialQA
 from app.models.project import (
     MEMBER_STATUS_ACTIVE,
     ROLE_ANSWERER,
@@ -24,7 +25,8 @@ from app.models.project import (
     Project,
     ProjectMember,
 )
-from app.models.question import Question
+from app.models.question import Answer, Question
+from app.models.review_card import ReviewCard
 from app.models.user import User
 
 # auto_error=False — 헤더가 없을 때 starlette 이 403 을 던지지 않게 하고
@@ -176,4 +178,109 @@ async def require_question_author(
     """
     if access.question.asker_id != user.id:
         raise ForbiddenRole("질문 작성자만 수행할 수 있습니다.")
+    return access
+
+
+@dataclass(frozen=True)
+class AnswerAccess:
+    """`/answers/{id}/feedback` 의 권한 확인 결과 (`05 §6`)."""
+
+    answer: Answer
+    question: Question
+    member: ProjectMember
+
+
+async def require_answer_asker(
+    answer_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AnswerAccess:
+    """크로스체크는 **질문자만** 한다 (`05 §6`).
+
+    확정은 담당자의 권한이고 질문자가 할 수 있는 건 "맞았다 / 달랐다"뿐이다 (룰 3).
+    같은 프로젝트의 다른 질문자도 피드백할 수 있다 — "맞았다 2건"이 성립하려면 그래야 한다
+    (`04 §7` UNIQUE(answer_id, user_id)).
+    """
+    answer = await db.get(Answer, answer_id)
+    if answer is None:
+        raise NotFound()
+
+    question = await db.get(Question, answer.question_id)
+    if question is None:
+        raise NotFound()
+
+    try:
+        member = await _active_membership(db, question.project_id, user)
+    except NotMember:
+        raise NotFound() from None
+
+    if member.role != ROLE_ASKER:
+        raise ForbiddenRole("질문자만 수행할 수 있습니다.")
+    return AnswerAccess(answer=answer, question=question, member=member)
+
+
+@dataclass(frozen=True)
+class CardAccess:
+    """`/review-cards/{id}` 의 권한 확인 결과 (`05 §7` — 담당자 전용)."""
+
+    card: ReviewCard
+    member: ProjectMember
+
+
+async def require_card_answerer(
+    card_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CardAccess:
+    """확인 카드는 **담당자 전용**이다 (`05 §7`).
+
+    ⚠️ 남의 프로젝트 카드는 404 다(문서·질문 경로와 같은 규약). 같은 프로젝트의 질문자는
+    카드의 존재를 알아도 되는 위치이므로 403 이다 — 큐가 담당자 화면이라는 사실 자체는
+    계약서에 공개돼 있다.
+    """
+    card = await db.get(ReviewCard, card_id)
+    if card is None:
+        raise NotFound()
+
+    try:
+        member = await _active_membership(db, card.project_id, user)
+    except NotMember:
+        raise NotFound() from None
+
+    if member.role != ROLE_ANSWERER:
+        raise ForbiddenRole("담당자만 수행할 수 있습니다.")
+    return CardAccess(card=card, member=member)
+
+
+@dataclass(frozen=True)
+class OfficialQAAccess:
+    """`/official-qas/{id}` 의 권한 확인 결과 (`05 §9`)."""
+
+    official_qa: OfficialQA
+    member: ProjectMember
+
+
+async def require_official_qa_member(
+    official_qa_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> OfficialQAAccess:
+    """확정 지식 열람은 멤버 전체에게 열려 있다 (`05 §9`)."""
+    official_qa = await db.get(OfficialQA, official_qa_id)
+    if official_qa is None:
+        raise NotFound()
+
+    try:
+        member = await _active_membership(db, official_qa.project_id, user)
+    except NotMember:
+        raise NotFound() from None
+    return OfficialQAAccess(official_qa=official_qa, member=member)
+
+
+async def require_official_qa_answerer(
+    access: OfficialQAAccess = Depends(require_official_qa_member),
+) -> OfficialQAAccess:
+    """`DELETE /official-qas/{id}` 는 담당자 전용이다 (`05 §9`)."""
+    if access.member.role != ROLE_ANSWERER:
+        raise ForbiddenRole("담당자만 수행할 수 있습니다.")
     return access

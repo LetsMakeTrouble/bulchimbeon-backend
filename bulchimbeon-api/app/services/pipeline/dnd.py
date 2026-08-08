@@ -12,7 +12,7 @@
 """
 
 import logging
-from datetime import datetime, time
+from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -73,3 +73,20 @@ def should_degrade(
     if away_mode:
         return True
     return in_dnd_window(now, timezone_name=timezone_name, dnd_start=dnd_start, dnd_end=dnd_end)
+
+
+def next_briefing_at(now: datetime, *, timezone_name: str, briefing_hour: int) -> datetime:
+    """다음 브리핑 시각(UTC) — `defer` 의 기본 만기다 (D15, `05 §7.3`).
+
+    타임존 판정이 DND 와 **같은 원천**(담당자 `users.timezone`)이라 여기 둔다. M6 의 브리핑
+    스케줄러도 이 함수를 쓴다 — 두 곳에서 따로 계산하면 담당자 교체 시 어긋난다.
+
+    이미 오늘 브리핑 시각을 지났으면 내일 같은 시각이다.
+    """
+    zone = _zone(timezone_name)
+    local = now.astimezone(zone)
+    hour = min(23, max(0, int(briefing_hour)))
+    candidate = local.replace(hour=hour, minute=0, second=0, microsecond=0)
+    if candidate <= local:
+        candidate += timedelta(days=1)
+    return candidate.astimezone(UTC)

@@ -14,6 +14,7 @@ from app.models.event import Event
 from app.models.official_qa import OfficialQA
 from app.models.project import Guideline, Project, ProjectMember
 from app.models.question import Answer, AnswerCitation, Question
+from app.models.review_card import Feedback, ReviewCard
 from app.models.user import User
 
 __all__ = [
@@ -23,10 +24,12 @@ __all__ = [
     "Document",
     "DocumentVersion",
     "Event",
+    "Feedback",
     "Guideline",
     "OfficialQA",
     "Project",
     "ProjectMember",
     "Question",
+    "ReviewCard",
     "User",
 ]

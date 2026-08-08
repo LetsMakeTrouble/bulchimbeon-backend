@@ -51,8 +51,9 @@ from app.models.question import (
     AnswerCitation,
     Question,
 )
+from app.models.review_card import CARD_REASON_FAILED
 from app.models.user import User
-from app.services import event_service, project_service, sse_manager
+from app.services import event_service, project_service, review_card_service, sse_manager
 from app.services.llm import LLMSchemaError, get_provider
 from app.services.pipeline import dnd, grading, prompts, quota, retrieval
 from app.services.pipeline.llm_schemas import (
@@ -204,8 +205,12 @@ async def mark_question_failed(
         entity_id=question.id,
         payload={"from": previous, "to": QUESTION_STATUS_FAILED},
     )
-    # TODO(M4): review_cards(reason='failed', answer_id=NULL, draft_answer=null) 생성
-    #   + `answer.failed` 알림 (D23). 카드가 없으면 담당자가 이 질문을 볼 길이 없다.
+    # 실패 안전망 카드 (D23) — **카드가 없으면 담당자가 이 질문을 볼 길이 없다.**
+    # 재처리(파이프라인 재실행) API 가 MVP 에 없으므로(`04 §6.1`) 해소 경로는 이 카드뿐이다.
+    await review_card_service.create_card(
+        db, question=question, answer=None, reason=CARD_REASON_FAILED
+    )
+    # TODO(M5): 질문자에게 `answer.failed` 알림 (`04 §4`, D23).
     await db.flush()
     return _Outcome(
         project_id=question.project_id,
@@ -772,9 +777,17 @@ async def _publish_generated(
         deadline_exceeded=deadline_exceeded,
     )
 
-    # TODO(M4): review_cards 생성 — 🟢 `reason='green'`(브리핑·알림 제외) / 🟡 `yellow` /
-    #   🔴 `red`(+ `question_struct` 복사). 데드라인 초과 발행도 카드를 만든다 (`06 §6`).
+    # 확인 카드 — 🟢 도 만든다. 큐가 최종 안전망이기 때문이다 (룰 6). 다만 🟢 은 브리핑·알림
+    # 대상에서 제외되고, "맞았다" 2건으로 `recommend_approve` 가 될 때 비로소 브리핑에
+    # 등장한다 (룰 1·3). 데드라인 초과로 발행된 🟡 도 카드를 만든다 (`06 §6` 안전망).
+    await review_card_service.create_card(
+        db,
+        question=question,
+        answer=answer,
+        reason=review_card_service.CARD_REASON_BY_GRADE[grade],
+    )
     # TODO(M5): 질문자 `answer.completed` 알림 + 담당자 `card.created` 알림 (`04 §4`).
+    #   ⚠️ `reason='green'` 카드는 알림 대상이 아니다 (`04 §4`).
     return _Outcome(
         project_id=ctx.project.id,
         question_id=question.id,

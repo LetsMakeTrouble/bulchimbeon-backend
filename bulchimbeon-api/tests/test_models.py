@@ -12,6 +12,10 @@ from app.database import Base
 M1_TABLES = {"users", "projects", "project_members", "guidelines", "events"}
 # M2 가 더하는 테이블.
 M2_TABLES = {"documents", "document_versions", "chunks"}
+# M3 질문 파이프라인.
+M3_TABLES = {"questions", "answers", "answer_citations", "official_qas"}
+# M4 확인 워크플로.
+M4_TABLES = {"review_cards", "feedbacks"}
 
 
 def test_m1_tables_are_registered_on_metadata() -> None:
@@ -20,6 +24,14 @@ def test_m1_tables_are_registered_on_metadata() -> None:
 
 def test_m2_tables_are_registered_on_metadata() -> None:
     assert set(Base.metadata.tables) >= M2_TABLES
+
+
+def test_m3_tables_are_registered_on_metadata() -> None:
+    assert set(Base.metadata.tables) >= M3_TABLES
+
+
+def test_m4_tables_are_registered_on_metadata() -> None:
+    assert set(Base.metadata.tables) >= M4_TABLES
 
 
 def test_single_active_version_partial_unique_index_exists() -> None:
@@ -44,6 +56,20 @@ def test_chunk_embedding_is_hnsw_cosine_and_1536() -> None:
     options = index.dialect_options["postgresql"]
     assert options["using"] == "hnsw"
     assert options["ops"] == {"embedding": "vector_cosine_ops"}
+
+
+def test_feedback_is_unique_per_user_and_answer() -> None:
+    """`04 §7` — 유저당 1건. 재제출은 409 이며 verdict 변경은 지원하지 않는다 (D12).
+
+    앱 계층에서도 막지만 제약이 최종 방어선이다 — 동시 제출 두 건이 둘 다 조회를 통과하면
+    "맞았다 2건"이 한 사람에게서 나와 승인 추천이 잘못 켜진다.
+    """
+    constraints = {
+        constraint.name: constraint for constraint in Base.metadata.tables["feedbacks"].constraints
+    }
+    constraint = constraints["uq_feedbacks_answer_user"]
+
+    assert [column.name for column in constraint.columns] == ["answer_id", "user_id"]
 
 
 def test_single_answerer_partial_unique_index_exists() -> None:

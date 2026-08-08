@@ -27,8 +27,29 @@ EVENT_ANSWER_REUSED = "answer.reused"
 #    이게 없으면 분모가 만들어지지 않아 지표가 항상 100% 로 보인다.
 EVENT_ANSWER_REUSE_MISSED = "answer.reuse_missed"
 
+# M4 확인 워크플로 (`04 §5`).
+#
+# ⚠️ 카드·공식 Q&A 이벤트는 **질문 스코프**로 남긴다 — `05 §13` 의 타임라인 조회가
+#    `?entity_type=question&entity_id=q-9` 이고 그 표에 `card.*` · `official_qa.*` 가
+#    함께 들어 있기 때문이다. 카드/Q&A 식별자는 payload 로 싣는다 (M3 파이프라인과 같은 규약).
+EVENT_CARD_CREATED = "card.created"
+EVENT_CARD_VIEWED = "card.viewed"  # 카드 처리 시간 지표의 시작점 (`05 §13`)
+EVENT_CARD_APPROVED = "card.approved"
+EVENT_CARD_EDITED = "card.edited"  # answer-option 확정도 이 타입이다 (`04 §5`)
+EVENT_CARD_REJECTED = "card.rejected"
+EVENT_CARD_DEFERRED = "card.deferred"
+EVENT_CARD_KEPT = "card.kept"  # payload: bulk
+EVENT_FEEDBACK_CREATED = "feedback.created"  # payload: verdict — 정정률의 원천
+EVENT_OFFICIAL_QA_CREATED = "official_qa.created"
+EVENT_OFFICIAL_QA_SUSPENDED = "official_qa.suspended"
+EVENT_OFFICIAL_QA_ARCHIVED = "official_qa.archived"
+# 문서 스코프다 — 한 번의 연쇄가 여러 질문에 걸치므로 질문에 붙일 수 없다.
+EVENT_ANSWERS_REVIEW_CASCADE = "answers.review_cascade"  # payload: count
+
 ENTITY_QUESTION = "question"
 ENTITY_ANSWER = "answer"
+ENTITY_DOCUMENT = "document"
+ENTITY_DOCUMENT_VERSION = "document_version"
 
 
 async def record_event(

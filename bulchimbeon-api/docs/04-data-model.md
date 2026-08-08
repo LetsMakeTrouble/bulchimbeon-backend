@@ -155,6 +155,7 @@ erDiagram
 | is_urgent | bool | 즉시 알림 대상 여부 |
 | first_viewed_at | timestamptz NULL | 카드 처리 시간 지표 시작점 |
 | deferred_until / resolved_at | timestamptz | |
+| resolved_by | uuid FK users NULL | 처리한 담당자. **`05 §1.4`의 409 `ALREADY_RESOLVED` body가 `resolved_by: {id, name}`를 요구**한다. 담당자는 교체되므로(D16) "현재 담당자"로 대체할 수 없다 (M4에서 추가, 2026-08-08 승인) |
 
 - `reason='green'`: 🟢 답변도 카드를 **큐에 적재**하되 **브리핑·알림 대상에서는 제외**한다. `correct` 피드백 2건 누적으로 `recommend_approve=true`가 될 때만 브리핑 최상단에 올라온다 (룰 3).
 - `reason='failed'`: 파이프라인 실패 안전망 카드. `answer_id=NULL`, 초안 없음, 질문자에게는 `answer.failed` 알림 (D23).

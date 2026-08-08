@@ -280,11 +280,12 @@ async def transfer_answerer(
     await db.refresh(project)
     await db.refresh(new_member)
 
-    # TODO(M4): pending/deferred 카드 이관
-    #   미처리 카드·브리핑 항목을 신규 담당자에게 넘긴다 (기능 6.3, `02 §9`).
-    #   review_cards 테이블이 M4 에서 생기므로 여기서는 이관할 대상 자체가 없다.
-    # 브리핑·DND 판정 타임존은 별도 코드 없이 따라간다 —
-    # 단일 원천이 담당자의 users.timezone 이다 (`02 §6`).
+    # 미처리 카드 이관(기능 6.3, `02 §9`)은 **별도 UPDATE 가 없다.**
+    # `review_cards` 는 `project_id` 스코프이고(`04 §2`) 큐 조회 권한은 `require_answerer` 가
+    # 판정하므로, ③④ 로 담당자가 바뀌는 순간 pending·deferred 카드가 그대로 신규 담당자의
+    # 인박스가 된다. 카드에 담당자 컬럼을 두면 이관 누락이라는 실패 모드가 생길 뿐이다.
+    # 브리핑·DND 판정 타임존도 같은 이유로 따라간다 — 단일 원천이 담당자의 users.timezone 이다
+    # (`02 §6`).
 
     await record_event(
         db,

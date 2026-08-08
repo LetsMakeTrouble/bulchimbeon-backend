@@ -18,7 +18,7 @@ from app.config import MAX_REQUEST_BODY_BYTES, settings
 from app.core.errors import AppError, error_payload
 from app.core.upload_limit import UploadSizeLimitMiddleware
 from app.database import get_db
-from app.routers import auth, documents, projects, questions
+from app.routers import auth, documents, official_qas, projects, questions, review_cards
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,8 @@ def create_app() -> FastAPI:
     app.include_router(projects.router, prefix=API_V1_PREFIX)
     app.include_router(documents.router, prefix=API_V1_PREFIX)
     app.include_router(questions.router, prefix=API_V1_PREFIX)
+    app.include_router(review_cards.router, prefix=API_V1_PREFIX)
+    app.include_router(official_qas.router, prefix=API_V1_PREFIX)
     return app
 
 

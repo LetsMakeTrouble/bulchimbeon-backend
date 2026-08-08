@@ -465,7 +465,7 @@
 | `is_urgent` | 즉시 알림 대상이었는지. 정렬 2순위 |
 | `recommend_approve` | 맞았다 2건↑ 승인 추천 (룰 3). 정렬 1순위 |
 | `grade` | 원본 답변 등급. `reason="failed"`면 `null` |
-| `question_preview_en` / `question_preview_ko` | 질문 앞부분(120자) 미리보기. 목록에서 상세를 부르지 않기 위한 필드 |
+| `question_preview_en` / `question_preview_ko` | 질문 앞부분(120자) 미리보기. 목록에서 상세를 부르지 않기 위한 필드. **`question_preview_en`은 `null`일 수 있다** — `reason="failed"`는 ① 번역 전에 죽었을 수 있다. ko로 대체하지 않는다(담당자 화면이 한국어를 영어로 오인한다) |
 | `first_viewed_at` | 아직 안 본 카드면 `null` → "NEW" 뱃지 |
 
 > ⚠️ **프리페치 금지.** `GET /review-cards/{id}`는 최초 조회 시 `first_viewed_at`을 기록한다
@@ -504,6 +504,14 @@
 - `draft_answer.citations[]`는 §6 `citations[]`와 **동일 스키마**다 (`document_id`·`document_version_id` 포함 → 팝업에서 근거 원문 열람).
 - `question_struct`는 🔴 전달용이며 `reason="red"`에만 채워진다. 그 외에는 `null`.
 - `reason="failed"`면 `answer_id: null`, `draft_answer: null`, `question_struct: null`이다 (D23).
+- 강제 🔴 4종은 발행할 문장이 없으므로 `draft_answer`가 `{"content_en": "", "citations": []}`다.
+  `null`인 `failed`와 구분된다 — 전자는 "초안이 비었다", 후자는 "초안이 없다".
+- `pending_feedbacks[]` — 담당자가 카드를 여는 사이 들어온 **미해소 피드백**이다 (룰 9).
+  담당자가 카드를 처리하면 함께 `resolved` 되고 그 건수가 응답의 `resolved_feedbacks`로 나온다.
+  ```json
+  { "id":"fb-3", "verdict":"different", "note":"부분 환불은 14일이라고 들었어요",
+    "user": { "id":"u-1", "name":"지수" }, "created_at":"2026-08-06T01:19:40Z" }
+  ```
 
 ### 7.1 카드 액션 매트릭스 (reason별 유효 액션)
 
@@ -556,6 +564,18 @@
 - `index`가 `question_struct.options[]` 범위를 벗어나면 **400 `VALIDATION_ERROR`**.
 - `question_struct`가 없는 카드(= `red`가 아닌 카드)면 **409 `INVALID_CARD_ACTION`**.
 - 확정 후 처리는 `edit`과 완전히 동일하다 — 번역·공식 Q&A 편입·정정 알림·교훈 후보·피드백 해소.
+
+### 7.4 POST `/projects/{id}/review-cards/bulk-keep` — 문서 갱신 묶음 전체 유지
+
+```json
+// 요청 — 브리핑 §8 `doc_review_bundles[].document_version_id`를 그대로 넘긴다
+{ "document_version_id": "dv-3" }
+// 200
+{ "document_version_id": "dv-3", "kept_count": 4, "resolved_feedbacks": 0 }
+```
+- `reason="doc_update"` 전용이며 그 묶음의 **pending·deferred 카드 전체**를 `kept`로 해소한다.
+- 카드 하나짜리 응답(§7.1)을 N개 담지 않는다 — 묶음 액션의 결과는 건수다. 개별 카드 상태는
+  큐(§7)를 재조회해 확인한다.
 
 ### 7.3 POST `/review-cards/{id}/defer` — 나중에 처리
 
@@ -632,6 +652,26 @@
 | GET | `/projects/{id}/official-qas?query=&limit=` | 멤버 | 확정 지식 목록/검색 (query는 키워드 매칭) |
 | GET | `/official-qas/{id}` | 멤버 | 상세 (ko/en 쌍, 출처 답변, reuse_count, status) |
 | DELETE | `/official-qas/{id}` | **담당자** | **`status`를 `archived`로 전환** (물리 삭제 아님) |
+
+```json
+// GET /projects/{id}/official-qas?query=&limit=&offset= 200 — §1.2 페이지네이션 봉투
+{
+  "items": [
+    { "id":"oq-3", "question_ko":"기본 환불 기한은 며칠인가요?",
+      "question_en":"What is the standard refund window?",
+      "answer_ko":"구매 후 30일입니다.", "answer_en":"Within 30 days of purchase.",
+      "status":"active", "correct_count":2, "reuse_count":4,
+      "created_at":"2026-08-06T02:41:00Z" }
+  ],
+  "total": 7, "limit": 20, "offset": 0
+}
+// GET /official-qas/{id} 200 — 목록 아이템 + 출처
+{ "id":"oq-3", "...": "목록 아이템과 동일",
+  "source_answer_id":"a-5", "source_question_id":"q-5" }
+```
+- `query`는 **키워드 매칭**이다(ko/en 질문·답변 본문 부분일치). 벡터 검색은 재사용 판정
+  (`06 §2` ②)의 몫이며 이 화면과 섞지 않는다.
+- `source_question_id`는 "이 지식이 어느 질문에서 나왔는가"의 딥링크용이다 (§6 상세로 이동).
 
 ```json
 // DELETE /official-qas/{id} 200

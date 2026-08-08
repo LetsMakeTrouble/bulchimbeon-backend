@@ -13,24 +13,24 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFound, PipelineInProgress
-from app.models.document import Chunk, Document, DocumentVersion
 from app.models.official_qa import OfficialQA
 from app.models.project import ROLE_ANSWERER, ProjectMember
 from app.models.question import (
     ANSWER_SOURCE_REUSED,
+    ANSWER_STATE_DRAFT,
     GRADE_RED,
+    QUESTION_STATUS_ANSWERED,
     QUESTION_STATUS_FAILED,
     QUESTION_STATUS_HELD,
     QUESTION_STATUS_PROCESSING,
     Answer,
-    AnswerCitation,
     Question,
 )
+from app.models.review_card import CARD_REASON_FAILED, CARD_REASON_RED, CARD_STATUS_PENDING
 from app.models.user import User
 from app.schemas.question import (
     AnswerOut,
     AskedBy,
-    Citation,
     FailureInfo,
     FeedbackSummary,
     HeldInfo,
@@ -41,7 +41,7 @@ from app.schemas.question import (
     QuestionListResponse,
     SimilarOfficialQA,
 )
-from app.services import event_service
+from app.services import answer_service, event_service, feedback_service, review_card_service
 
 # `05 §1.5` — 수신자 언어로 서버가 만드는 문자열. 코드 분기는 프론트가 하지 않는다.
 _DISCLAIMER = {
@@ -82,10 +82,9 @@ _FAILURE_MESSAGE = {
 # `05 §6` — 실패의 `reason` 은 화면 문구가 아니라 **로깅용 코드**다.
 FAILURE_REASON = "pipeline_error"
 
-# M4 의 `review_cards` 가 생기기 전까지 카드 상태를 알 수 없다. 파이프라인이 🔴·실패로
-# 끝나면 카드는 **반드시 만들어지므로**(D23·룰 6 인박스 안전망) `pending` 이 사실에 가깝다.
-# TODO(M4): 실제 `review_cards.status` 를 읽는다.
-_DEFAULT_CARD_STATUS = "pending"
+# 카드가 어떤 이유로도 조회되지 않을 때의 표기. 🔴·실패는 카드를 **반드시 만들지만**
+# (D23·룰 6 인박스 안전망) 계약서의 `card_status` 는 null 을 허용하지 않는다 (`05 §6`).
+_FALLBACK_CARD_STATUS = CARD_STATUS_PENDING
 
 _MAX_LIMIT = 100
 
@@ -187,8 +186,13 @@ async def list_questions(
     )
 
     answers = await _answers_by_question(db, [question.id for question in questions])
+    summaries = await feedback_service.summaries_for_answers(
+        db, [answer.id for answer in answers.values()], viewer_id=member.user_id
+    )
     return QuestionListResponse(
-        items=[_to_list_item(question, answers.get(question.id)) for question in questions],
+        items=[
+            _to_list_item(question, answers.get(question.id), summaries) for question in questions
+        ],
         total=total,
         limit=limit,
         offset=offset,
@@ -202,7 +206,11 @@ async def _answers_by_question(db: AsyncSession, question_ids: list[UUID]) -> di
     return {answer.question_id: answer for answer in rows}
 
 
-def _to_list_item(question: Question, answer: Answer | None) -> QuestionListItem:
+def _to_list_item(
+    question: Question,
+    answer: Answer | None,
+    summaries: dict[UUID, FeedbackSummary],
+) -> QuestionListItem:
     """`05 §6` 목록 아이템 표.
 
     - `grade`: `processing` 이면 null, `held` 면 `"red"`.
@@ -230,12 +238,23 @@ def _to_list_item(question: Question, answer: Answer | None) -> QuestionListItem
         matching_rate=answer.matching_rate if published and answer is not None else None,
         state=answer.state if published and answer is not None else None,
         created_at=question.created_at,
-        feedback_summary=FeedbackSummary() if published else None,
+        feedback_summary=(
+            summaries.get(answer.id, FeedbackSummary())
+            if published and answer is not None
+            else None
+        ),
     )
 
 
 async def get_detail(db: AsyncSession, question: Question, viewer: User) -> QuestionDetail:
-    """`05 §6` GET /questions/{id} — 🟢🟡 / 🔴 `held_info` / `failed` `failure_info` / reused."""
+    """`05 §6` GET /questions/{id} — 🟢🟡 / 🔴 `held_info` / `failed` `failure_info` / reused.
+
+    > ### `held_info` 는 해소된 뒤에도 남는다 (`05 §6` 프론트 필수 처리)
+    > 담당자 확정으로 보류가 풀리면 `status` 는 `answered` 가 되고 `answer` 가 채워지지만,
+    > `held_info` 는 **이력용으로 유지**하되 `card_status` 만 `resolved` 로 바뀐다. 프론트는
+    > `held_info != null && status == "answered"` 를 "보류였다가 담당자가 답한 질문"으로
+    > 렌더한다 — `held_info` 가 있다고 보류로 표시하지 않는다.
+    """
     asker = await db.get(User, question.asker_id)
     answer = await db.scalar(select(Answer).where(Answer.question_id == question.id))
 
@@ -243,22 +262,23 @@ async def get_detail(db: AsyncSession, question: Question, viewer: User) -> Ques
     failure_info: FailureInfo | None = None
     answer_out: AnswerOut | None = None
 
-    if question.status == QUESTION_STATUS_HELD and answer is not None:
-        # 🔴 은 답변을 내보내지 않는다. 초안은 DB 에 남아 카드에서만 노출된다.
+    if answer is not None and answer.held_reason is not None:
+        # 🔴 로 보류됐던 사실은 답변 행의 `held_reason` 이 원천이다. DND 강등으로 🟡 이 된
+        # 답변은 `held_reason` 이 비어 있으므로(`06 §2` ⑥) 여기 걸리지 않는다.
         held_info = HeldInfo(
-            reason=answer.held_reason or "low_confidence",
-            message=_localized(
-                _HELD_MESSAGES[answer.held_reason or "low_confidence"], viewer.language
-            ),
-            card_status=_DEFAULT_CARD_STATUS,
+            reason=answer.held_reason,
+            message=_localized(_HELD_MESSAGES[answer.held_reason], viewer.language),
+            card_status=await _card_status(db, question.id, (CARD_REASON_RED,)),
         )
-    elif question.status == QUESTION_STATUS_FAILED:
+
+    if question.status == QUESTION_STATUS_FAILED:
         failure_info = FailureInfo(
             reason=FAILURE_REASON,
             message=_localized(_FAILURE_MESSAGE, viewer.language),
-            card_status=_DEFAULT_CARD_STATUS,
+            card_status=await _card_status(db, question.id, (CARD_REASON_FAILED,)),
         )
-    elif answer is not None and question.status != QUESTION_STATUS_PROCESSING:
+    elif question.status == QUESTION_STATUS_ANSWERED and answer is not None:
+        # 🔴 보류(`held`)·처리 중에는 답변을 내보내지 않는다. 초안은 카드에서만 노출된다.
         answer_out = await _to_answer_out(db, answer, viewer)
 
     return QuestionDetail(
@@ -273,6 +293,12 @@ async def get_detail(db: AsyncSession, question: Question, viewer: User) -> Ques
         held_info=held_info,
         failure_info=failure_info,
     )
+
+
+async def _card_status(db: AsyncSession, question_id: UUID, reasons: tuple[str, ...]) -> str:
+    """`held_info`·`failure_info` 의 `card_status` (`05 §6`)."""
+    status = await review_card_service.card_status_for_question(db, question_id, reasons)
+    return status or _FALLBACK_CARD_STATUS
 
 
 async def _similar_official_qa(db: AsyncSession, answer: Answer | None) -> SimilarOfficialQA | None:
@@ -320,53 +346,23 @@ async def _to_answer_out(db: AsyncSession, answer: Answer, viewer: User) -> Answ
         source=answer.source,
         degraded_from_red=answer.degraded_from_red,
         expires_at=answer.expires_at,
-        disclaimer=_localized(_REUSED_DISCLAIMER if reused else _DISCLAIMER, viewer.language),
-        citations=await _citations(db, answer.id),
-        feedback_summary=FeedbackSummary(),  # TODO(M4): feedbacks 집계
+        disclaimer=_disclaimer(answer, viewer.language),
+        citations=await answer_service.citations_for_answer(db, answer.id),
+        feedback_summary=await feedback_service.summary_for_answer(
+            db, answer.id, viewer_id=viewer.id
+        ),
         official_qa=official_qa_ref,
     )
 
 
-async def _citations(db: AsyncSession, answer_id: UUID) -> list[Citation]:
-    """`05 §6` `citations[]` — 열람 URL 을 만들 수 있도록 문서·버전 id 를 함께 싣는다."""
-    rows = (
-        await db.execute(
-            select(
-                AnswerCitation.id,
-                AnswerCitation.chunk_id,
-                AnswerCitation.quote,
-                AnswerCitation.similarity,
-                Chunk.meta,
-                Document.id.label("document_id"),
-                Document.title.label("doc_title"),
-                DocumentVersion.id.label("document_version_id"),
-                DocumentVersion.version_no,
-            )
-            .join(Chunk, Chunk.id == AnswerCitation.chunk_id)
-            .join(DocumentVersion, DocumentVersion.id == Chunk.document_version_id)
-            .join(Document, Document.id == DocumentVersion.document_id)
-            .where(AnswerCitation.answer_id == answer_id)
-            .order_by(AnswerCitation.similarity.desc())
-        )
-    ).all()
+def _disclaimer(answer: Answer, language: str) -> str | None:
+    """`05 §6` — 참고용 표기는 **미확정 상태에만** 붙는다.
 
-    citations: list[Citation] = []
-    for row in rows:
-        meta = row.meta or {}
-        heading_path = meta.get("heading_path")
-        page_no = meta.get("page_no")
-        citations.append(
-            Citation(
-                id=row.id,
-                chunk_id=row.chunk_id,
-                document_id=row.document_id,
-                document_version_id=row.document_version_id,
-                doc_title=row.doc_title,
-                version_no=row.version_no,
-                heading_path=list(heading_path) if isinstance(heading_path, list) else [],
-                page_no=page_no if isinstance(page_no, int) else None,
-                quote=row.quote,
-                similarity=row.similarity,
-            )
-        )
-    return citations
+    담당자가 확정한 답변에는 disclaimer 가 없고(`05 §6` held → answered 예시가 `null`),
+    재사용 답변만 "공식 확정 답변입니다."를 단다.
+    """
+    if answer.source == ANSWER_SOURCE_REUSED:
+        return _localized(_REUSED_DISCLAIMER, language)
+    if answer.state == ANSWER_STATE_DRAFT:
+        return _localized(_DISCLAIMER, language)
+    return None

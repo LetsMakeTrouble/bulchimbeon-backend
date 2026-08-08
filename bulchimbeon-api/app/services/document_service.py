@@ -32,6 +32,7 @@ from app.models.document import (
 )
 from app.models.user import User
 from app.schemas.document import DocumentDetail, DocumentOut, DocumentVersionOut
+from app.services import review_cascade_service
 from app.services.event_service import EVENT_DOCUMENT_VERSION_ACTIVATED, record_event
 from app.utils.parsing import EXTENSION_TO_MIME, DocumentParseError, parse_file
 from app.utils.storage import resolve_storage_path
@@ -393,11 +394,15 @@ async def activate_version(
     )
     await db.flush()
 
-    # TODO(M4): 재검토 연쇄 (룰 5, D9).
-    #   이 버전의 **이전 활성 버전**을 근거로 확정된 답변(공식 Q&A 포함)을 전부 under_review 로
-    #   내리고, 담당자에게 `doc.review_needed` 알림 + `answers.review_cascade` 이벤트를 남긴다.
-    #   answers/official_qas/review_cards 테이블이 M4 에서 생기므로 지금은 대상 자체가 없다.
-    review_cascade_count = 0
+    # 재검토 연쇄 (룰 5, D9) — 이 문서의 **다른 버전**을 근거로 확정된 답변(과 그 공식 Q&A)을
+    # 전부 under_review 로 내리고 `doc_update` 카드 묶음을 만든다. 묶음 키는 새 버전 id 다.
+    review_cascade_count = await review_cascade_service.cascade_for_document(
+        db,
+        document=document,
+        trigger_version_id=version.id,
+        exclude_version_id=version.id,
+        actor_id=actor_id,
+    )
 
     await record_event(
         db,
@@ -426,22 +431,38 @@ def activation_message(language: str, count: int) -> str:
 # --- 삭제 · 원문 열람 -------------------------------------------------------------------
 
 
-async def soft_delete(db: AsyncSession, document: Document) -> None:
-    """soft delete (D20).
+async def soft_delete(db: AsyncSession, document: Document, *, actor_id: UUID) -> int:
+    """soft delete (D20). 돌려주는 값은 재검토 연쇄 건수다.
 
     청크는 **물리 삭제하지 않는다** — 과거 답변의 `citations[]` 가 청크를 가리키고 있다.
     검색에서 빠지는 것은 `pipeline/retrieval.py` 의 범위 조건이 담당한다.
+
+    근거가 **바뀌는 것**과 **사라지는 것**은 답변 입장에서 동일한 사건이므로 활성 전환과
+    **같은 연쇄**를 태운다. 다만 파생된 공식 Q&A 는 `under_review` 가 아니라 `archived` 다 —
+    돌아올 근거 문서가 없다.
     """
     if document.status == DOCUMENT_STATUS_DELETED:
-        return  # 재호출은 멱등이다.
+        return 0  # 재호출은 멱등이다.
+
+    # 카드 묶음 키로 쓸 "사라지는 시점의 활성 버전". 이 값이 있어야 담당자가 bulk-keep 으로
+    # 한 번에 유지할 수 있다 (`05 §7`).
+    active_version_id = await db.scalar(
+        select(DocumentVersion.id).where(
+            DocumentVersion.document_id == document.id,
+            DocumentVersion.is_active.is_(True),
+        )
+    )
 
     document.status = DOCUMENT_STATUS_DELETED
     await db.flush()
 
-    # TODO(M4): soft delete → 재검토 연쇄 + 파생 공식 Q&A archived (D20).
-    #   근거가 **바뀌는 것**과 **사라지는 것**은 답변 입장에서 동일한 사건이다.
-    #   활성 전환(`activate_version`)과 **같은** 연쇄를 태우고,
-    #   이 문서에서 파생된 official_qas 를 `archived` 로 내린다(+ `official_qa.archived` 이벤트).
+    return await review_cascade_service.cascade_for_document(
+        db,
+        document=document,
+        trigger_version_id=active_version_id,
+        archive_official_qas=True,
+        actor_id=actor_id,
+    )
 
 
 async def read_content(db: AsyncSession, version: DocumentVersion) -> str:

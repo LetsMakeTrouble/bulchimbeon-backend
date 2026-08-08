@@ -463,7 +463,9 @@ async def test_activate_survives_both_swap_directions(
         )
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body["review_cascade_count"] == 0  # TODO(M4) 이전에는 항상 0 이다.
+        # 이 문서를 근거로 **확정된** 답변이 없으므로 연쇄 대상도 없다 (룰 5).
+        # 연쇄 자체의 검증은 `tests/test_review_cascade.py` 다.
+        assert body["review_cascade_count"] == 0
         assert body["message"]
 
         # 활성 버전은 **항상 정확히 1개**다.

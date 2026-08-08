@@ -13,8 +13,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
+    AnswerAccess,
     QuestionAccess,
     get_current_user,
+    require_answer_asker,
     require_asker,
     require_member,
     require_question_author,
@@ -24,6 +26,8 @@ from app.database import get_db
 from app.models.project import ProjectMember
 from app.models.user import User
 from app.schemas.question import (
+    FeedbackCreate,
+    FeedbackResponse,
     QuestionAccepted,
     QuestionCreate,
     QuestionDetail,
@@ -31,7 +35,7 @@ from app.schemas.question import (
     UrgencyPatch,
     UrgencyPatched,
 )
-from app.services import question_service
+from app.services import feedback_service, question_service
 from app.services.pipeline.answer import run_answer_pipeline
 
 router = APIRouter(tags=["questions"])
@@ -125,3 +129,24 @@ async def patch_question(
     question = await question_service.patch_urgency(db, access.question, payload.urgency)
     await db.commit()
     return UrgencyPatched(id=question.id, urgency=question.urgency, status=question.status)
+
+
+@router.post("/answers/{answer_id}/feedback", response_model=FeedbackResponse)
+async def create_feedback(
+    payload: FeedbackCreate,
+    access: AnswerAccess = Depends(require_answer_asker),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FeedbackResponse:
+    """크로스체크 — 맞았다 / 달랐다 (`05 §6`, 룰 3).
+
+    - 허용 상태는 `draft`·`verified` 뿐이다. 그 외는 409 `FEEDBACK_NOT_ALLOWED` (D12).
+    - **유저당 1건**이며 재제출은 verdict 가 달라도 409 `DUPLICATE_FEEDBACK` 이다.
+    - `different` 는 확정 답변에도 가능하며 재검토로 전환된다 (룰 3 ⚠️).
+    - 응답에 갱신된 `feedback_summary` 가 항상 들어 있어 재조회가 필요 없다.
+    """
+    result = await feedback_service.submit(
+        db, question=access.question, answer=access.answer, user=user, payload=payload
+    )
+    await db.commit()
+    return result

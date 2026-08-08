@@ -187,9 +187,15 @@ async def get_version_content(
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     access: DocumentAccess = Depends(require_document_answerer),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    """soft delete (D20). 청크는 남고 검색에서만 빠진다."""
-    await document_service.soft_delete(db, access.document)
+    """soft delete (D20). 청크는 남고 검색에서만 빠진다.
+
+    ⚠️ **활성 전환과 동일한 재검토 연쇄가 일어난다** — 이 문서를 근거로 확정된 답변은
+    `under_review` 로 내려가고 `doc_update` 카드가 생기며, 파생된 공식 Q&A 는 `archived` 다.
+    204 라 건수를 실을 곳이 없으므로 담당자는 큐(`05 §7`)에서 확인한다.
+    """
+    await document_service.soft_delete(db, access.document, actor_id=user.id)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

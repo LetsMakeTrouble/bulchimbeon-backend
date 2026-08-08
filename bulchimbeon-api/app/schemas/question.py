@@ -8,9 +8,10 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 MAX_QUESTION_LENGTH = 4000
+MAX_FEEDBACK_NOTE_LENGTH = 1000
 
 Urgency = Literal["normal", "urgent"]
 Grade = Literal["green", "yellow", "red"]
@@ -48,12 +49,42 @@ class UrgencyPatched(BaseModel):
     status: QuestionStatus
 
 
+FeedbackVerdict = Literal["correct", "different"]
+
+
 class FeedbackSummary(BaseModel):
-    """`05 §6`. M4 의 `feedbacks` 테이블이 원천이며 M3 에서는 항상 0 이다."""
+    """`05 §6`. `feedbacks` 테이블이 원천이며 `my_feedback` 은 **조회자 기준**이다."""
 
     correct: int = 0
     different: int = 0
-    my_feedback: Literal["correct", "different"] | None = None
+    my_feedback: FeedbackVerdict | None = None
+
+
+class FeedbackCreate(BaseModel):
+    """크로스체크 (`05 §6`) — **"달랐다"는 사유 한 줄이 필수**다."""
+
+    verdict: FeedbackVerdict
+    note: str | None = Field(default=None, max_length=MAX_FEEDBACK_NOTE_LENGTH)
+
+    @model_validator(mode="after")
+    def _note_required_for_different(self) -> "FeedbackCreate":
+        if self.verdict == "different" and not (self.note or "").strip():
+            raise ValueError("different 피드백에는 사유(note)가 필요합니다.")
+        return self
+
+
+class FeedbackResponse(BaseModel):
+    """`05 §6` 200.
+
+    **갱신된 `feedback_summary` 를 항상 포함한다** — 프론트 낙관적 업데이트의 전제이며
+    `GET /questions/{id}` 재조회를 불필요하게 만든다.
+    """
+
+    answer_id: UUID
+    answer_state: AnswerState
+    message: str
+    feedback_summary: FeedbackSummary
+    recommend_approve: bool
 
 
 class Citation(BaseModel):

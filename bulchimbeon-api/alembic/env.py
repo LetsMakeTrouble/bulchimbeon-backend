@@ -10,11 +10,13 @@ from logging.config import fileConfig
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 
+# ⚠️ autogenerate 대상 등록. `app.models` 를 import 해야 Base.metadata 에 테이블이 붙는다.
+# 빠뜨리면 `alembic revision --autogenerate` 가 **에러 없이 빈 리비전**을 뱉는다.
+# 개별 모델이 아니라 패키지를 import 한다 — 새 모델은 app/models/__init__.py 에만 추가하면 된다.
+import app.models  # noqa: F401
 from alembic import context
 from app.config import settings
 from app.database import Base, create_engine
-
-# app.models 가 생기면 여기서 import 해 Base.metadata 에 등록한다 (autogenerate 대상).
 
 config = context.config
 

@@ -17,8 +17,12 @@ from app import __version__
 from app.config import settings
 from app.core.errors import AppError, error_payload
 from app.database import get_db
+from app.routers import auth, projects
 
 logger = logging.getLogger(__name__)
+
+# `05 §1.1` — Base URL 은 `{HOST}/api/v1` 이다. /health 만 이 접두사 밖에 있다 (`05 §14`).
+API_V1_PREFIX = "/api/v1"
 
 # FastAPI 내부에서 raw HTTPException 이 올라올 때의 매핑.
 # 도메인 로직은 AppError 를 쓰므로 여기 걸리는 건 라우팅 404·메서드 405 같은 프레임워크 예외다.
@@ -53,6 +57,9 @@ def create_app() -> FastAPI:
 
     _register_exception_handlers(app)
     _register_health(app)
+
+    app.include_router(auth.router, prefix=API_V1_PREFIX)
+    app.include_router(projects.router, prefix=API_V1_PREFIX)
     return app
 
 

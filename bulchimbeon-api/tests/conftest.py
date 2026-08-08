@@ -18,7 +18,11 @@ from sqlalchemy.pool import NullPool
 
 from app.config import settings
 from app.database import Base, create_engine, get_db
-from app.main import app
+
+# ⚠️ `Base.metadata.create_all` 이 테이블을 만들려면 모델이 먼저 등록돼 있어야 한다.
+# 빠뜨리면 테이블 없이 테스트가 돌다가 엉뚱한 곳에서 터진다 (또는 조용히 초록이다).
+import app.models  # noqa: F401  # isort:skip
+from app.main import app  # isort:skip
 
 # 관리 작업(CREATE DATABASE)을 붙일 유지보수 DB. 대상 DB 자체에는 붙을 수 없다.
 ADMIN_DATABASE = "postgres"

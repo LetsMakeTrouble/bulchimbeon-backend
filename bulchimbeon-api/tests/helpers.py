@@ -74,3 +74,12 @@ async def join_project(client: AsyncClient, actor: Actor, invite_code: str) -> d
 def error_code(response: Any) -> str:
     """`05 §1.4` — 에러는 항상 `{"error": {"code", "message"}}` 다."""
     return response.json()["error"]["code"]
+
+
+def error_message(response: Any) -> str:
+    """`error.message` 는 **개발자용 한국어 고정**이다 (`05 §1.5`).
+
+    같은 `code` 를 여러 관문이 낼 때(예: 400 `VALIDATION_ERROR`) 어느 쪽이 잡았는지를
+    테스트가 구분하는 유일한 수단이다.
+    """
+    return response.json()["error"]["message"]

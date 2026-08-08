@@ -37,10 +37,15 @@
 5. Alembic 초기화 (async 템플릿) — **pgvector 함정 3종을 이번에 전부 처리한다** (`03 §5.4`)
    1. 최초 마이그레이션의 **첫 줄**에 `op.execute("CREATE EXTENSION IF NOT EXISTS vector")`.
       없으면 이후 `vector` 타입 컬럼 생성이 `UndefinedObject`로 죽는다.
-   2. **`alembic/script.py.mako`에 `from pgvector.sqlalchemy import Vector` 추가.**
-      autogenerate가 만든 리비전은 `Vector(1536)`를 뱉지만 import는 넣어주지 않아 실행 시 `NameError`가 난다.
-   3. **`database.py`의 asyncpg 커넥션 init에서 `register_vector` 호출.**
-      없으면 임베딩이 문자열로 왕복해 `<=>` 연산이 실패하거나 조용히 느려진다.
+   2. **`alembic/script.py.mako`에 pgvector import 추가.**
+      autogenerate가 만든 리비전은 벡터 컬럼을 뱉지만 import는 넣어주지 않아 실행 시 `NameError`가 난다.
+      ⚠️ **M2 실측(2026-08-08)**: 실제로 뱉는 것은 `Vector(1536)`이 아니라 완전 경로
+      **`pgvector.sqlalchemy.vector.VECTOR(dim=1536)`**이다. `from pgvector.sqlalchemy import Vector`만으로는
+      `pgvector` 이름이 바인딩되지 않으므로 `import pgvector.sqlalchemy`가 함께 있어야 한다.
+   3. **`register_vector`는 raw asyncpg 전용 — SQLAlchemy 경로에서는 등록하지 않는다.**
+      ⚠️ **M2 실측(2026-08-08)이 기존 문구를 뒤집었다** (`03 §5.4` ③ 참조). 코덱을 켜면
+      `pgvector.sqlalchemy.Vector`의 문자열 변환과 이중 충돌해 **모든 벡터 바인딩**이
+      `DataError: expected list or ndarray`로 죽는다.
 6. `GET /health` — DB ping 포함 `{"status":"ok","db":"ok","version":"0.1.0"}`
 7. **테스트 인프라 (확정 — 다른 선택지를 만들지 말 것, `03 §5.3`)**
    - **testcontainers 미도입.** 이미 떠 있는 Postgres(`docker compose up -d db`)에

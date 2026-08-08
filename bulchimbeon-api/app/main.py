@@ -14,10 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import __version__
-from app.config import settings
+from app.config import MAX_REQUEST_BODY_BYTES, settings
 from app.core.errors import AppError, error_payload
+from app.core.upload_limit import UploadSizeLimitMiddleware
 from app.database import get_db
-from app.routers import auth, projects
+from app.routers import auth, documents, projects
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +56,16 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # ⚠️ 업로드 상한은 **폼 파싱 이전**에 걸어야 방어가 된다 (`03 §7`).
+    # 라우터 안에서 재는 것만으로는 Starlette 이 이미 본문 전체를 임시 파일로 떨군 뒤다.
+    app.add_middleware(UploadSizeLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_BYTES)
+
     _register_exception_handlers(app)
     _register_health(app)
 
     app.include_router(auth.router, prefix=API_V1_PREFIX)
     app.include_router(projects.router, prefix=API_V1_PREFIX)
+    app.include_router(documents.router, prefix=API_V1_PREFIX)
     return app
 
 
@@ -123,8 +129,7 @@ def _register_health(app: FastAPI) -> None:
 
         ⚠️ **DB 가 죽어도 200 을 반환한다.** 상태는 본문의 `db` 필드로만 알린다.
         실패 시 5xx 를 주면 배포 플랫폼(Railway/Render)의 헬스체크가 이를 기동 실패로 보고
-        `alembic upgrade head` 가 끝나기 전 첫 부팅을 죽인다 — 확장이 없는 DB 에서는
-        런타임 엔진이 커넥션조차 못 열어(`unknown type: public.vector`) 재시작 루프가 된다.
+        `alembic upgrade head` 가 끝나기 전 첫 부팅을 죽여 재시작 루프가 된다.
         `00-kickoff:44` 과 `03 §5.1` 은 정상 응답만 규정하므로 실패 코드를 신설하지 않는다.
 
         세션 생성은 커넥션을 열지 않으므로(첫 execute 에서 연다) 의존성 단계는 항상 통과하고,

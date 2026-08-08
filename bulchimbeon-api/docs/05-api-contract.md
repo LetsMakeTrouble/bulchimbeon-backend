@@ -174,6 +174,10 @@
 ```
 - **인제스트 완료 신호**: 업로드/새 버전 응답은 `ingest_status: "pending"` 상태로 즉시 201을 준다.
   완료는 SSE `document.ingested` (§12)로 통지된다. SSE 미사용 시 `GET /projects/{id}/documents`를 3초 간격 폴링.
+  > ⚠️ **그래서 201 응답의 `active_version`은 아직 `null`이다**(새 버전 업로드면 **직전 버전**이 그대로 활성으로 내려온다).
+  > `auto_activate=true`는 "지금 활성화"가 아니라 **"인제스트가 `ready`에 도달하면 활성화"**를 뜻한다 — 인제스트가 실패한 버전을 활성으로 세우면 그 문서의 근거가 통째로 사라지기 때문이다(`02 §5` 구현 노트).
+  > 프론트는 `document.ingested`를 받은 뒤 목록/상세를 재조회해 활성 버전을 얻는다. 업로드 직후 화면에는 `ingest_status`로 "처리 중"을 표시한다.
+- **`PATCH .../activate`는 `ingest_status='ready'`인 버전만 받는다.** `pending`·`processing`이면 409 `PIPELINE_IN_PROGRESS`, `failed`면 422 `PIPELINE_FAILED`다(§1.4의 기존 코드). 활성인데 검색되지 않는 버전은 근거 공백을 만든다.
 - **근거 원문 열람 URL 구성** (기능 2.2): §6 `citations[]`의 `document_id`·`document_version_id`를 그대로 넣어
   `GET /documents/{document_id}/versions/{document_version_id}/content`를 호출한다.
   응답 `{document_id, version_id, version_no, title, mime, content}` — 프론트는 `heading_path`로 스크롤 앵커를 잡고

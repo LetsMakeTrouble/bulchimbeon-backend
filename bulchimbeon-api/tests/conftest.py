@@ -7,8 +7,10 @@
   느리고 HNSW 인덱스 재생성 비용이 크다.
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
@@ -18,6 +20,9 @@ from sqlalchemy.pool import NullPool
 
 from app.config import settings
 from app.database import Base, create_engine, get_db
+from app.services import llm
+from app.services.llm.fake_provider import FakeLLMProvider
+from app.services.pipeline import ingest
 
 # ⚠️ `Base.metadata.create_all` 이 테이블을 만들려면 모델이 먼저 등록돼 있어야 한다.
 # 빠뜨리면 테이블 없이 테스트가 돌다가 엉뚱한 곳에서 터진다 (또는 조용히 초록이다).
@@ -37,10 +42,9 @@ async def ensure_database_exists(url: str) -> None:
     target = make_url(url)
     admin_url = target.set(database=ADMIN_DATABASE)
 
-    # 확장이 없는 DB 이므로 vector 코덱을 켜지 않는다. CREATE DATABASE 는 트랜잭션 안에서 못 돈다.
+    # CREATE DATABASE 는 트랜잭션 안에서 못 돈다.
     engine = create_engine(
         admin_url.render_as_string(hide_password=False),
-        register_vector_codec=False,
         isolation_level="AUTOCOMMIT",
         poolclass=NullPool,
     )
@@ -63,7 +67,6 @@ async def drop_database(url: str) -> None:
 
     engine = create_engine(
         admin_url.render_as_string(hide_password=False),
-        register_vector_codec=False,
         isolation_level="AUTOCOMMIT",
         poolclass=NullPool,
     )
@@ -80,9 +83,8 @@ async def db_engine() -> AsyncIterator[AsyncEngine]:
     url = settings.test_database_url
     await ensure_database_exists(url)
 
-    # ⚠️ 확장을 만들기 전에는 vector 코덱을 등록할 수 없다 — register_vector 가
-    # public.vector 타입을 조회하다 ValueError 로 커넥션을 못 연다 (app/database.py 참조).
-    bootstrap = create_engine(url, register_vector_codec=False, poolclass=NullPool)
+    # `Base.metadata.create_all` 이 vector 컬럼을 만들려면 확장이 먼저 있어야 한다 (`03 §5.4` ①).
+    bootstrap = create_engine(url, poolclass=NullPool)
     try:
         async with bootstrap.begin() as conn:
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
@@ -126,6 +128,66 @@ async def db_session(db_connection: AsyncConnection) -> AsyncIterator[AsyncSessi
         yield session
     finally:
         await session.close()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def storage_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """업로드 파일을 임시 디렉터리로 보낸다.
+
+    기본값은 `PROJECT_ROOT/storage` 라(`03 §4`) 그대로 두면 테스트가 레포 안에 파일을 쌓는다.
+    `STORAGE_DIR` 는 절대 경로여야 한다는 제약(`03 §5.2`)은 tmp 경로가 이미 만족한다.
+    """
+    original = settings.storage_dir
+    settings.storage_dir = tmp_path_factory.mktemp("storage")
+    try:
+        yield settings.storage_dir
+    finally:
+        settings.storage_dir = original
+
+
+@pytest.fixture(scope="session", autouse=True)
+def fake_llm_provider() -> Iterator[FakeLLMProvider]:
+    """모든 테스트를 FakeLLMProvider 로 고정한다 (룰 2 — **실 API 호출 테스트 금지**).
+
+    `.env` 의 `LLM_PROVIDER` 가 무엇이든(기본 openai) 여기서 덮어쓴다. 세션 스코프인 이유는
+    캐시된 인스턴스를 테스트마다 새로 만들 필요가 없기 때문이고, 호출 이력을 보고 싶은
+    테스트는 `fake_llm_provider.embed_calls` 를 직접 읽는다.
+    """
+    original = settings.llm_provider
+    settings.llm_provider = "fake"
+    llm.reset_provider_cache()
+    try:
+        provider = llm.get_provider()
+        assert isinstance(provider, FakeLLMProvider)
+        yield provider
+    finally:
+        settings.llm_provider = original
+        llm.reset_provider_cache()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def task_session_factory(db_connection: AsyncConnection) -> AsyncIterator[None]:
+    """BackgroundTasks 가 여는 **자체 세션**을 테스트 트랜잭션에 물린다.
+
+    운영에서 인제스트 태스크는 `AsyncSessionLocal()` 로 전역 엔진의 새 세션을 연다
+    (`03 §2` 원칙 4). 테스트에서 그대로 두면 태스크가 **개발 DB** 에 쓰고, 롤백 격리
+    (`03 §5.3`)를 우회해 테스트가 서로를 오염시킨다.
+    같은 커넥션에 세이브포인트로 물려 두면 태스크가 쓴 것도 테스트 종료 시 함께 롤백된다.
+    """
+
+    def factory() -> AsyncSession:
+        return AsyncSession(
+            bind=db_connection,
+            join_transaction_mode="create_savepoint",
+            expire_on_commit=False,
+        )
+
+    original = ingest.session_factory
+    ingest.session_factory = factory
+    try:
+        yield
+    finally:
+        ingest.session_factory = original
 
 
 @pytest_asyncio.fixture

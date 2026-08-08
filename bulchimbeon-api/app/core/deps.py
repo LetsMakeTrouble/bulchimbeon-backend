@@ -5,6 +5,7 @@
 탈퇴한 멤버(D18)는 비멤버와 같다.
 """
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import Depends
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ForbiddenRole, NotFound, NotMember, Unauthorized
 from app.core.security import ACCESS_TOKEN_TYPE, decode_token
 from app.database import get_db
+from app.models.document import Document
 from app.models.project import (
     MEMBER_STATUS_ACTIVE,
     ROLE_ANSWERER,
@@ -44,11 +46,7 @@ async def get_current_user(
     return user
 
 
-async def require_member(
-    project_id: UUID,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> ProjectMember:
+async def _active_membership(db: AsyncSession, project_id: UUID, user: User) -> ProjectMember:
     """활성 멤버십을 돌려준다. 없으면 404(프로젝트 없음) 또는 403 `NOT_MEMBER`."""
     member = await db.scalar(
         select(ProjectMember).where(
@@ -67,6 +65,14 @@ async def require_member(
     raise NotMember()
 
 
+async def require_member(
+    project_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProjectMember:
+    return await _active_membership(db, project_id, user)
+
+
 async def require_answerer(member: ProjectMember = Depends(require_member)) -> ProjectMember:
     if member.role != ROLE_ANSWERER:
         raise ForbiddenRole("담당자만 수행할 수 있습니다.")
@@ -82,3 +88,45 @@ async def require_asker(member: ProjectMember = Depends(require_member)) -> Proj
     if member.role != ROLE_ASKER:
         raise ForbiddenRole("질문자만 수행할 수 있습니다.")
     return member
+
+
+@dataclass(frozen=True)
+class DocumentAccess:
+    """문서 경로(`/documents/{id}/…`)의 권한 확인 결과 (`05 §4`).
+
+    경로에 `project_id` 가 없으므로 문서를 먼저 읽어 소속 프로젝트를 알아낸 뒤 멤버십을 본다.
+    라우터가 문서를 다시 조회하지 않도록 함께 돌려준다.
+    """
+
+    document: Document
+    member: ProjectMember
+
+
+async def require_document_member(
+    document_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DocumentAccess:
+    """멤버 읽기 (`05 §4` — 담당자 전용 쓰기, 멤버 읽기).
+
+    ⚠️ 존재하지 않는 문서와 **남의 프로젝트 문서**를 똑같이 404 로 돌려준다.
+    403 을 주면 "그 id 의 문서가 존재한다"는 사실이 비멤버에게 새어 나간다.
+    """
+    document = await db.get(Document, document_id)
+    if document is None:
+        raise NotFound()
+
+    try:
+        member = await _active_membership(db, document.project_id, user)
+    except NotMember:
+        raise NotFound() from None
+    return DocumentAccess(document=document, member=member)
+
+
+async def require_document_answerer(
+    access: DocumentAccess = Depends(require_document_member),
+) -> DocumentAccess:
+    """담당자 전용 쓰기 (`05 §4`)."""
+    if access.member.role != ROLE_ANSWERER:
+        raise ForbiddenRole("담당자만 수행할 수 있습니다.")
+    return access

@@ -9,8 +9,18 @@
 둘 다 조용히 실패하므로 누락을 알아채기 어렵다. `tests/test_models.py` 가 이 등록 여부를 지킨다.
 """
 
+from app.models.document import Chunk, Document, DocumentVersion
 from app.models.event import Event
 from app.models.project import Guideline, Project, ProjectMember
 from app.models.user import User
 
-__all__ = ["Event", "Guideline", "Project", "ProjectMember", "User"]
+__all__ = [
+    "Chunk",
+    "Document",
+    "DocumentVersion",
+    "Event",
+    "Guideline",
+    "Project",
+    "ProjectMember",
+    "User",
+]

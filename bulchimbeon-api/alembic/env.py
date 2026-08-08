@@ -52,13 +52,7 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    # ⚠️ 마이그레이션 엔진은 vector 코덱을 등록하지 않는다.
-    # 확장을 만드는 것이 리비전 0001 자체라, 코덱을 켜면 그 리비전을 실행할 커넥션조차 열 수 없다
-    # (`ValueError: unknown type: public.vector`).
-    # 마이그레이션은 DDL 텍스트만 보내므로 코덱이 필요 없다.
-    connectable = create_engine(
-        _database_url(), register_vector_codec=False, poolclass=pool.NullPool
-    )
+    connectable = create_engine(_database_url(), poolclass=pool.NullPool)
 
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

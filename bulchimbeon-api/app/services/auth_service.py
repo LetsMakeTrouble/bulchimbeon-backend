@@ -3,7 +3,9 @@
 커밋은 라우터가 한다 (요청 하나 = 트랜잭션 하나).
 """
 
-from sqlalchemy import select
+from uuid import UUID
+
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import Unauthorized, ValidationError
@@ -15,10 +17,12 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.models.project import MEMBER_STATUS_ACTIVE, Project, ProjectMember
+from app.models.project import MEMBER_STATUS_ACTIVE, ROLE_ANSWERER, Project, ProjectMember
+from app.models.review_card import CARD_OPEN_STATUSES, ReviewCard
 from app.models.user import User
 from app.schemas.auth import LoginRequest, SignupRequest, TokenResponse, UserOut
 from app.schemas.project import ProjectSummary
+from app.services import notification_service
 
 
 async def signup(db: AsyncSession, payload: SignupRequest) -> User:
@@ -76,9 +80,8 @@ async def my_project_summaries(db: AsyncSession, user: User) -> list[ProjectSumm
 
     `member_status='left'` 인 프로젝트는 목록에서 빠진다 (`05 §2`, D18).
 
-    `unread_notifications` · `pending_cards` 의 원천 테이블(notifications · review_cards)은
-    각각 M5 · M4 에서 생긴다. 계약상 필드이므로 shape 은 지키고 0 을 채운다 —
-    ProjectSummary 의 기본값이다.
+    ⚠️ `pending_cards` 는 **담당자 프로젝트에서만 의미 있는 값**이며 `asker` 에게는 항상 0 이다
+    (`05 §2`). 큐는 담당자 화면이므로 질문자에게 미처리 건수를 세어 주면 계약과 어긋난다.
     """
     rows = await db.execute(
         select(Project, ProjectMember.role, ProjectMember.status)
@@ -89,6 +92,12 @@ async def my_project_summaries(db: AsyncSession, user: User) -> list[ProjectSumm
         )
         .order_by(Project.created_at)
     )
+    memberships = rows.all()
+
+    unread = await notification_service.unread_counts_by_project(db, user.id)
+    pending = await _pending_card_counts(
+        db, [project.id for project, role, _ in memberships if role == ROLE_ANSWERER]
+    )
 
     return [
         ProjectSummary(
@@ -97,6 +106,28 @@ async def my_project_summaries(db: AsyncSession, user: User) -> list[ProjectSumm
             role=role,
             member_status=status,
             away_mode=project.away_mode,
+            unread_notifications=unread.get(project.id, 0),
+            pending_cards=pending.get(project.id, 0),
         )
-        for project, role, status in rows.all()
+        for project, role, status in memberships
     ]
+
+
+async def _pending_card_counts(db: AsyncSession, project_ids: list[UUID]) -> dict[UUID, int]:
+    """담당자 프로젝트의 미처리 카드 수 — `pending`·`deferred` 를 함께 센다.
+
+    "살아 있는 카드"의 정의는 `CARD_OPEN_STATUSES` 한 곳에만 있다 (D14 만료 스위퍼와 같은
+    기준) — 여기서 상태 문자열을 다시 나열하면 두 곳이 어긋난다.
+    """
+    if not project_ids:
+        return {}
+
+    rows = await db.execute(
+        select(ReviewCard.project_id, func.count())
+        .where(
+            ReviewCard.project_id.in_(project_ids),
+            ReviewCard.status.in_(CARD_OPEN_STATUSES),
+        )
+        .group_by(ReviewCard.project_id)
+    )
+    return {project_id: count for project_id, count in rows.all()}

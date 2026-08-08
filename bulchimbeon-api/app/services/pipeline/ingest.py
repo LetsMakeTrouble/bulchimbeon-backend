@@ -28,6 +28,7 @@ from app.models.document import (
     Document,
     DocumentVersion,
 )
+from app.models.project import Project
 from app.services import document_service, sse_manager
 from app.services.llm import get_provider
 from app.utils.chunking import ChunkDraft, chunk_pages
@@ -69,11 +70,16 @@ session_factory: Callable[[], AsyncSession] = _default_session_factory
 
 @dataclass(frozen=True)
 class _VersionRef:
-    """SSE 발행에 필요한 식별자. 세션이 닫힌 뒤에도 쓰이므로 ORM 객체를 들고 다니지 않는다."""
+    """SSE 발행에 필요한 식별자. 세션이 닫힌 뒤에도 쓰이므로 ORM 객체를 들고 다니지 않는다.
+
+    `answerer_id` 를 함께 담는 이유: `document.ingested` 의 수신자는 **담당자**이고
+    (`05 §12.3`) SSE 구독은 유저 단위인데, 발행 시점에는 세션이 닫혀 조회할 수 없다.
+    """
 
     project_id: UUID
     document_id: UUID
     version_id: UUID
+    answerer_id: UUID | None
 
 
 async def run_ingest(version_id: UUID, *, activate_on_ready: bool = True) -> None:
@@ -112,8 +118,8 @@ async def run_ingest(version_id: UUID, *, activate_on_ready: bool = True) -> Non
         # 버전이 사라졌거나 이미 처리 중이었다 — 발행할 대상이 없다.
         return
 
-    await sse_manager.publish_document_ingested(
-        project_id=ref.project_id,
+    sse_manager.publish_document_ingested(
+        answerer_id=ref.answerer_id,
         document_id=ref.document_id,
         version_id=ref.version_id,
         status=status,
@@ -134,9 +140,7 @@ async def _ingest(
         return None
 
     version, document = found
-    ref = _VersionRef(
-        project_id=document.project_id, document_id=document.id, version_id=version.id
-    )
+    ref = await _version_ref(db, version=version, document=document)
 
     # 진행 상태를 먼저 커밋한다 — 임베딩 배치는 수 초가 걸리고, 그동안 목록 조회가
     # `pending` 이 아니라 `processing` 을 보게 해야 "멈춘 건지 도는 건지"가 구분된다.
@@ -228,6 +232,17 @@ async def _mark_failed(db: AsyncSession, version_id: UUID, exc: Exception) -> _V
     version.ingest_status = INGEST_STATUS_FAILED
     version.ingest_error = _user_facing_error(exc)
     await db.flush()
+    return await _version_ref(db, version=version, document=document)
+
+
+async def _version_ref(
+    db: AsyncSession, *, version: DocumentVersion, document: Document
+) -> _VersionRef:
+    """SSE 수신자(담당자)까지 미리 담아 둔다 — 발행 시점에는 세션이 닫혀 있다."""
+    project = await db.get(Project, document.project_id)
     return _VersionRef(
-        project_id=document.project_id, document_id=document.id, version_id=version.id
+        project_id=document.project_id,
+        document_id=document.id,
+        version_id=version.id,
+        answerer_id=project.answerer_id if project is not None else None,
     )

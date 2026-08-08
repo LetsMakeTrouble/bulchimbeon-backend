@@ -93,14 +93,16 @@ async def test_document_ingested_event_is_published_for_ready_and_failed(
     """`document.ingested` 는 **ready·failed 양쪽에서** 발행된다.
 
     실패를 알리지 않으면 프론트가 `pending` 인 채로 영원히 폴링한다 (`05 §4`).
-    M5 이전이라 배선이 없으므로 훅 호출 자체를 목으로 확인한다.
+
+    ⚠️ M5 에서 수신자가 `project_id` → **담당자 `answerer_id`** 로 바뀌었다. SSE 구독은
+    유저 단위이고(`05 §12.3` 의 "수신자" 열) 이 이벤트의 수신자는 담당자다.
     """
     published: list[dict] = []
 
-    async def _spy(*, project_id, document_id, version_id, status) -> None:
+    def _spy(*, answerer_id, document_id, version_id, status) -> None:
         published.append(
             {
-                "project_id": str(project_id),
+                "answerer_id": str(answerer_id),
                 "document_id": str(document_id),
                 "version_id": str(version_id),
                 "status": status,
@@ -120,7 +122,8 @@ async def test_document_ingested_event_is_published_for_ready_and_failed(
 
     assert published == [
         {
-            "project_id": project["id"],
+            # 프로젝트 생성자가 담당자다 (D1).
+            "answerer_id": owner.id,
             "document_id": document["id"],
             "version_id": latest_version(document)["id"],
             "status": "failed" if should_fail else "ready",
@@ -136,7 +139,7 @@ async def test_run_ingest_on_missing_version_does_not_publish(
 
     published: list[object] = []
 
-    async def _spy(**kwargs: object) -> None:
+    def _spy(**kwargs: object) -> None:
         published.append(kwargs)
 
     monkeypatch.setattr(sse_manager, "publish_document_ingested", _spy)

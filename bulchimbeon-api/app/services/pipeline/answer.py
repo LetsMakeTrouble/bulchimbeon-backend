@@ -53,7 +53,13 @@ from app.models.question import (
 )
 from app.models.review_card import CARD_REASON_FAILED
 from app.models.user import User
-from app.services import event_service, project_service, review_card_service, sse_manager
+from app.services import (
+    event_service,
+    notification_service,
+    project_service,
+    review_card_service,
+    sse_manager,
+)
 from app.services.llm import LLMSchemaError, get_provider
 from app.services.pipeline import dnd, grading, prompts, quota, retrieval
 from app.services.pipeline.llm_schemas import (
@@ -154,7 +160,12 @@ class _Ctx:
 # 진입점
 # --------------------------------------------------------------------------------------
 async def run_answer_pipeline(question_id: UUID) -> None:
-    """백그라운드 진입점. **UUID 하나만** 받는다 (`03 §2` 원칙 4)."""
+    """백그라운드 진입점. **UUID 하나만** 받는다 (`03 §2` 원칙 4).
+
+    ⚠️ 알림 레코드와 SSE 는 파이프라인 **안에서** 적재된다. SSE 발행은 커밋 직후
+    `sse_manager` 의 아웃박스가 하므로 여기서 따로 부르지 않는다 — 커밋 전에 발행하면
+    프론트의 재조회가 커밋 전 상태를 읽는다 (`sse_manager` 독스트링).
+    """
     outcome: _Outcome | None = None
 
     try:
@@ -163,6 +174,7 @@ async def run_answer_pipeline(question_id: UUID) -> None:
             await db.commit()
     except Exception as exc:
         logger.exception("answer pipeline 실패: question=%s", question_id)
+        outcome = None  # 커밋되지 않은 결과를 완료로 기록하지 않는다.
         try:
             async with session_factory() as db:  # ⚠️ 실패 기록은 반드시 **새 세션**
                 outcome = await mark_question_failed(db, question_id, exc)
@@ -170,16 +182,13 @@ async def run_answer_pipeline(question_id: UUID) -> None:
         except Exception:
             logger.exception("answer pipeline 실패 기록마저 실패: question=%s", question_id)
 
-    if outcome is None:
-        return
-
-    # 🔴·실패에도 발행한다 — 알리지 않으면 프론트가 `processing` 으로 영원히 폴링한다.
-    await sse_manager.publish_answer_completed(
-        project_id=outcome.project_id,
-        question_id=outcome.question_id,
-        grade=outcome.grade,
-        status=outcome.status,
-    )
+    if outcome is not None:
+        logger.info(
+            "pipeline 완료: question=%s grade=%s status=%s",
+            outcome.question_id,
+            outcome.grade,
+            outcome.status,
+        )
 
 
 async def mark_question_failed(
@@ -207,10 +216,26 @@ async def mark_question_failed(
     )
     # 실패 안전망 카드 (D23) — **카드가 없으면 담당자가 이 질문을 볼 길이 없다.**
     # 재처리(파이프라인 재실행) API 가 MVP 에 없으므로(`04 §6.1`) 해소 경로는 이 카드뿐이다.
-    await review_card_service.create_card(
+    card = await review_card_service.create_card(
         db, question=question, answer=None, reason=CARD_REASON_FAILED
     )
-    # TODO(M5): 질문자에게 `answer.failed` 알림 (`04 §4`, D23).
+
+    # 질문자에게 `answer.failed` (D23) + 담당자에게 `card.created` (룰 6).
+    await notification_service.notify_answer_failed(db, question=question)
+    project = await db.get(Project, question.project_id)
+    if project is not None and review_card_service.notifies_answerer(card):
+        await notification_service.notify_card_created(
+            db, card=card, question=question, project=project
+        )
+
+    # 🔴·실패에도 발행한다 — 알리지 않으면 프론트가 `processing` 으로 영원히 폴링한다.
+    sse_manager.queue_answer_completed(
+        db,
+        asker_id=question.asker_id,
+        question_id=question.id,
+        grade=None,
+        status=QUESTION_STATUS_FAILED,
+    )
     await db.flush()
     return _Outcome(
         project_id=question.project_id,
@@ -657,7 +682,17 @@ async def _publish_reused(ctx: _Ctx, official_qa: OfficialQA, similarity: float)
         deadline_exceeded=False,
     )
 
-    # TODO(M5): 질문자에게 `answer.completed` 알림 레코드 생성 (`04 §4`).
+    # 재사용은 **카드를 만들지 않으므로**(D11) 담당자 알림도 없다. 질문자에게만 알린다.
+    await notification_service.notify_answer_completed(
+        db, question=question, answer=answer, held=False
+    )
+    sse_manager.queue_answer_completed(
+        db,
+        asker_id=question.asker_id,
+        question_id=question.id,
+        grade=GRADE_GREEN,
+        status=QUESTION_STATUS_ANSWERED,
+    )
     return _Outcome(
         project_id=ctx.project.id,
         question_id=question.id,
@@ -780,14 +815,32 @@ async def _publish_generated(
     # 확인 카드 — 🟢 도 만든다. 큐가 최종 안전망이기 때문이다 (룰 6). 다만 🟢 은 브리핑·알림
     # 대상에서 제외되고, "맞았다" 2건으로 `recommend_approve` 가 될 때 비로소 브리핑에
     # 등장한다 (룰 1·3). 데드라인 초과로 발행된 🟡 도 카드를 만든다 (`06 §6` 안전망).
-    await review_card_service.create_card(
+    card = await review_card_service.create_card(
         db,
         question=question,
         answer=answer,
         reason=review_card_service.CARD_REASON_BY_GRADE[grade],
     )
-    # TODO(M5): 질문자 `answer.completed` 알림 + 담당자 `card.created` 알림 (`04 §4`).
-    #   ⚠️ `reason='green'` 카드는 알림 대상이 아니다 (`04 §4`).
+
+    # 질문자 `answer.completed` — 🔴 은 발행이 아니라 **보류 안내**다 (`04 §4`).
+    await notification_service.notify_answer_completed(
+        db, question=question, answer=answer, held=is_red
+    )
+    # 담당자 `card.created` — ⚠️ `reason='green'` 카드는 알림 대상이 아니다 (룰 1).
+    # 판정은 `notifies_answerer` 한 곳에만 있다: 여기서 `reason == 'green'` 을 다시 쓰면
+    # 브리핑(M6)이 같은 규칙을 또 구현하게 되고 두 곳이 어긋난다.
+    if review_card_service.notifies_answerer(card):
+        await notification_service.notify_card_created(
+            db, card=card, question=question, project=ctx.project
+        )
+
+    sse_manager.queue_answer_completed(
+        db,
+        asker_id=question.asker_id,
+        question_id=question.id,
+        grade=grade,
+        status=question.status,
+    )
     return _Outcome(
         project_id=ctx.project.id,
         question_id=question.id,

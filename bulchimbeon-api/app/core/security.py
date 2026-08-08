@@ -64,6 +64,28 @@ def create_refresh_token(user_id: UUID, *, expires_delta: timedelta | None = Non
     return _create_token(user_id, REFRESH_TOKEN_TYPE, delta)
 
 
+def access_token_expires_at(token: str) -> datetime:
+    """access token 의 만료 시각 — **SSE 스트림의 상한**이다 (`05 §12.2` 4번).
+
+    티켓 TTL(60초)로 스트림 수명을 대신할 수 없고(1분마다 끊긴다), 무제한으로 두면 만료된
+    자격증명으로 계속 수신하게 된다. 그래서 티켓 발급 시 이 값을 함께 적어 둔다.
+
+    검증은 `decode_token` 이 이미 한 뒤에 부르는 것을 전제로 하지만, 여기서도 같은 예외
+    체계를 통과시켜 두 경로가 어긋나지 않게 한다.
+    """
+    try:
+        claims: dict[str, Any] = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+    except ExpiredSignatureError as exc:
+        raise TokenExpired() from exc
+    except JWTError as exc:
+        raise Unauthorized() from exc
+
+    exp = claims.get("exp")
+    if not isinstance(exp, int | float):
+        raise Unauthorized()
+    return datetime.fromtimestamp(float(exp), tz=UTC)
+
+
 def decode_token(token: str, *, expected_type: str) -> UUID:
     """토큰을 검증하고 user_id 를 돌려준다.
 

@@ -4,6 +4,8 @@
 """
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -16,9 +18,23 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app import __version__
 from app.config import MAX_REQUEST_BODY_BYTES, settings
 from app.core.errors import AppError, error_payload
+from app.core.scheduler import create_scheduler
 from app.core.upload_limit import UploadSizeLimitMiddleware
 from app.database import get_db
-from app.routers import auth, documents, official_qas, projects, questions, review_cards
+from app.routers import (
+    auth,
+    documents,
+    notifications,
+    official_qas,
+    projects,
+    questions,
+    review_cards,
+    sse,
+)
+
+# ⚠️ import 만으로 SSE 아웃박스의 `after_commit` 훅이 등록된다 (`services/sse_manager.py`).
+#    라우터를 통해 전이적으로 들어오지만, 발행이 이 import 에 걸려 있다는 사실을 여기 남긴다.
+from app.services import sse_manager  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +57,33 @@ _FALLBACK_SERVER_ERROR = ("INTERNAL_ERROR", "서버 오류가 발생했습니다
 _FALLBACK_CLIENT_ERROR = ("VALIDATION_ERROR", "요청을 처리할 수 없습니다.")
 
 
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """APScheduler 기동·정지 (`03 §3` — 만료 스위퍼 · 좀비 회수).
+
+    ⚠️ **`--workers 1` 전제다** (룰 9). 워커마다 이 lifespan 이 돌아 스케줄러가 워커 수만큼
+    발화한다. 자세한 근거와 확장 시점의 정답은 `app/core/scheduler.py` 독스트링.
+
+    테스트는 ASGI transport 로 붙어 lifespan 을 돌리지 않으므로(httpx `ASGITransport` 기본)
+    잡이 테스트 중에 끼어들지 않는다. 잡 본체는 `sweeper_service` 에 있고 시각을 주입받으므로
+    직접 호출로 검증한다.
+    """
+    scheduler = create_scheduler()
+    scheduler.start()
+    logger.info("scheduler 기동: 잡 %s개", len(scheduler.get_jobs()))
+    try:
+        yield
+    finally:
+        scheduler.shutdown(wait=False)
+        logger.info("scheduler 정지")
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="불침번 API",
         version=__version__,
         description="시차가 큰 글로벌 팀을 위한 비동기 Q&A 협업 서비스",
+        lifespan=lifespan,
     )
 
     app.add_middleware(
@@ -69,6 +107,8 @@ def create_app() -> FastAPI:
     app.include_router(questions.router, prefix=API_V1_PREFIX)
     app.include_router(review_cards.router, prefix=API_V1_PREFIX)
     app.include_router(official_qas.router, prefix=API_V1_PREFIX)
+    app.include_router(notifications.router, prefix=API_V1_PREFIX)
+    app.include_router(sse.router, prefix=API_V1_PREFIX)
     return app
 
 

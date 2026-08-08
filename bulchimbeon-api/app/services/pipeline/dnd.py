@@ -75,6 +75,35 @@ def should_degrade(
     return in_dnd_window(now, timezone_name=timezone_name, dnd_start=dnd_start, dnd_end=dnd_end)
 
 
+def next_dnd_end_at(
+    now: datetime, *, timezone_name: str, dnd_start: str, dnd_end: str
+) -> datetime | None:
+    """DND 종료 시각(UTC). **DND 밖이면 `None`** — 보류할 이유가 없다는 뜻이다.
+
+    룰 6 은 "담당자의 방해 금지 시간에는 **어떤 즉시 알림도** 보내지 않는다"라고 못박는다.
+    긴급 카드 알림조차 이 구간에서는 `notifications.deliver_after` 를 여기가 돌려주는 시각으로
+    잡아 보류한다 (`05 §11` 목록·카운트가 `deliver_after <= now()` 만 노출한다).
+
+    ⚠️ `away_mode`(퇴근 모드)는 여기서 보지 않는다. 강등 판정(`should_degrade`)과 달리
+    보류는 **끝나는 시각이 필요**한데 퇴근 모드에는 그것이 없고, 룰 6 이 알림 보류의 기준으로
+    지목한 것은 DND 시간대뿐이다.
+    """
+    if not in_dnd_window(now, timezone_name=timezone_name, dnd_start=dnd_start, dnd_end=dnd_end):
+        return None
+
+    end = _parse_hhmm(dnd_end)
+    if end is None:  # in_dnd_window 가 이미 걸렀지만 타입을 좁힌다.
+        return None
+
+    zone = _zone(timezone_name)
+    local = now.astimezone(zone)
+    candidate = local.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
+    if candidate <= local:
+        # 자정을 넘는 구간(`22:00~07:00`)에서 아직 자정 전이면 종료는 내일이다.
+        candidate += timedelta(days=1)
+    return candidate.astimezone(UTC)
+
+
 def next_briefing_at(now: datetime, *, timezone_name: str, briefing_hour: int) -> datetime:
     """다음 브리핑 시각(UTC) — `defer` 의 기본 만기다 (D15, `05 §7.3`).
 

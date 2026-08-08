@@ -31,7 +31,7 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 | 3 | M2 문서 인제스트 — **✅ 완료 2026-08-08** | ~~`@prompts/02-documents-ingest.md`~~ DoD 6/6, `feat(M2): document ingest pipeline` | 컷 없음(4포맷 전부) |
 | 4~5 | **M3 질문 파이프라인** ⭐ — **✅ 완료 2026-08-08** | ~~`@prompts/03-question-pipeline.md`~~ DoD 7/7, `feat(M3): question answering pipeline with grading` | ⛔ 불가 |
 | 6 | **M4 확인 워크플로** ⭐ — **✅ 완료 2026-08-08** | ~~`@prompts/04-review-workflow.md`~~ DoD 통과, `feat(M4): review workflow and knowledge loop` | ⛔ 불가 |
-| 7 | M5 알림·SSE | `@prompts/05-notifications-sse.md 실행해줘` | `answer.completed`만 필수 |
+| 7 | M5 알림·SSE — **✅ 완료 2026-08-08** | ~~`@prompts/05-notifications-sse.md`~~ DoD 6/6, `feat(M5): notifications, sse, expiry sweeper` | 컷 없음(전 범위) |
 | 8 | **클라우드 배포 1차** | `@prompts/09-seed-deploy.md 의 배포 부분만 먼저 실행해줘` | ⛔ 불가 |
 | 9 | M6 브리핑·교훈 | `@prompts/06-briefing-lessons.md 실행해줘` | 스케줄러·교훈 컷 가능 |
 | 10 | M7 지표 | `@prompts/07-metrics-events.md 실행해줘` | 2종만 남기고 컷 가능 |
@@ -44,68 +44,68 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 
 ## 다음 세션 프롬프트 (그대로 복붙)
 
-> ✅ **M4 확인 워크플로는 2026-08-08에 완료됐다** (`feat(M4): review workflow and knowledge loop`).
-> `pytest` 269 passed + slow 1 passed, `ruff check`·`ruff format --check` 통과, 마이그레이션 head는 **0005**.
-> `alembic check` = "No new upgrade operations detected" (모델 ↔ 마이그레이션 일치 확인).
+> ✅ **M5 알림·SSE는 2026-08-08에 완료됐다** (`feat(M5): notifications, sse, expiry sweeper`).
+> `pytest` **316 passed**(slow 포함), `ruff check`·`ruff format --check` 통과,
+> 마이그레이션 head는 **0006**. `alembic check` = "No new upgrade operations detected".
+> `grep -rn "TODO(M5)" app/` → **0건**.
 >
-> ⚠️ **`review_cards`에 컬럼이 하나 늘었다 — `resolved_by`** (`04 §2`에 반영, 사용자 승인).
-> `05 §1.4`의 409 `ALREADY_RESOLVED` body가 `resolved_by: {id, name}`를 요구하는데 데이터 모델에
-> 저장할 자리가 없었다. 담당자는 교체되므로(D16) "현재 담당자"로 대체할 수 없다.
+> **M6·M8이 그대로 물려받는 것** (다시 만들지 마라)
+> - **SSE 발행은 트랜잭션 아웃박스다** (`services/sse_manager.py`). 서비스는
+>   `sse_manager.enqueue(db, ...)`(또는 `queue_*` 헬퍼)로 **세션에 적재만** 하고, 실제 발행은
+>   SQLAlchemy `after_commit` 훅이 한다. 라우터에서 flush 를 부를 필요가 없고 **불러서도 안 된다** —
+>   커밋 전에 발행하면 프론트의 재조회가 커밋 전 상태를 읽는다.
+> - **`sse_manager.queue_briefing_ready` / `queue_sync_completed` 는 이미 있다.** 이벤트명과
+>   payload 를 계약서(`05 §12.3`)에 맞춰 박아 둔 것이며 **호출부만 없다** —
+>   M6 브리핑 스케줄러 / M8 동기화가 그 자리에서 부르면 된다.
+> - **보류 알림 flush 가 M6 몫이다.** 비긴급 `card.created`·`feedback.different` 는
+>   `notifications.deliver_after` = 다음 브리핑 시각으로 적재돼 있고 **목록·카운트에 나타나지
+>   않는다**. 브리핑 발송 시 `deliver_after <= now()` 인 것을 발행해야 알림이 나간다.
+>   지금은 시각이 지나면 자동으로 노출되므로 "영원히 안 나가는" 상태는 아니다.
+> - **`notification_service.answerer_deliver_after(db, project=, immediate=)`** 가 룰 6 분기의
+>   단일 구현이다(긴급→즉시 / 비긴급→브리핑 / DND→종료 이후). 브리핑 시각은
+>   `dnd.next_briefing_at`, DND 종료는 `dnd.next_dnd_end_at` 이다.
+> - **`accuracy_service.for_grade(db, project_id=, grade=, language=, window_days=)`** 가
+>   등급별 실측 정확도(D25)의 유일한 구현이다. `05 §13` `grade_accuracy[]` 는 이것을 등급마다
+>   불러 만들면 되고, 아이템 스키마는 `schemas/question.GradeAccuracy` 다(§6과 §13이 같은 shape).
+> - **`sweeper_service`** 에 만료 스위퍼·좀비 회수가 있고 둘 다 `now=` 를 주입받는다.
+>   잡 등록은 `core/scheduler.py` — M6 브리핑 잡을 여기에 더한다.
 >
-> **M5가 그대로 물려받는 것** (다시 만들지 마라)
-> - **알림을 붙일 자리는 전부 `TODO(M5)` 주석으로 표시돼 있다.** `grep -rn "TODO(M5)" app/` 하면
->   9곳이 나온다: 파이프라인 발행/실패(`pipeline/answer.py`), 피드백 `different`
->   (`feedback_service.py`), 재검토 연쇄 `doc.review_needed`(`review_cascade_service.py`),
->   D21 재사용 답변 알림·`answer.corrected`(`official_qa_service.py`), SSE 배선(`sse_manager.py`).
-> - **`review_card_service.notifies_answerer(card)`** — 룰 1의 "🟢 카드는 알림 대상이 아니다"
->   판정이 이미 있다. 알림 코드에서 `reason == 'green'`을 다시 쓰지 마라. M6 브리핑도 이걸 쓴다.
-> - **`dnd.next_briefing_at(now, timezone_name=, briefing_hour=)`** — `defer` 기본 만기(D15)가
->   쓰고 있다. M6 브리핑 스케줄러가 같은 함수를 써야 담당자 교체 시 어긋나지 않는다.
-> - **만료 스위퍼(D14)의 조건 절반이 이미 있다** — `review_card.CARD_OPEN_STATUSES`
->   (`pending`·`deferred`)가 "살아 있는 카드"의 정의다. 스위퍼는
->   `state='draft' AND expires_at < now() AND 이 상태의 카드가 없을 것`이다.
-> - **좀비 회수 잡(`06 §4`)은 실패 카드를 직접 만들지 마라** —
->   `review_card_service.create_card(reason=CARD_REASON_FAILED)`를 부른다. 파이프라인 총 실패
->   경로(`mark_question_failed`)가 이미 그 함수를 쓴다.
-> - **확정 답변은 `expires_at`이 `None`이 된다**(`_confirm`). 스위퍼가 `draft`만 보므로 중복
->   방어이지만 `05 §6`의 확정 답변 예시가 `expires_at: null`이라 화면 계약이기도 하다.
+> ⚠️ **알림함 문자열은 수신자 `users.language` 로 만들어 저장한다** (`05 §1.5`).
+> 문안 표는 `notification_service` 상단에 ko/en 쌍으로 모여 있다. 새 타입을 만들 때
+> **계약서 어휘(`04 §4` 12종)를 벗어나지 마라** — `tests/test_notification_contract.py` 가
+> 문서를 파싱해 막는다.
 >
-> ⚠️ **카드·공식 Q&A 이벤트는 전부 질문 스코프다** (`entity_type='question'`, 카드/Q&A id는
-> payload). `05 §13` 타임라인이 `?entity_type=question&entity_id=q-9`이기 때문이다.
-> M7 지표(`card_handle_30s_rate`)는 `card.viewed` → `card.*`를 **`payload.card_id`로** 짝짓는다.
+> ⚠️ **`event: ping` 은 우리가 직접 내보낸다** (`sse_stream_service.PING_INTERVAL_SECONDS`=14초).
+> FastAPI 네이티브 keepalive 는 `: ping` **주석**이라 브라우저 `EventSource` 가 관측할 수 없고,
+> `05 §12.2` 5번이 프론트에 요구한 "30초 넘게 ping 없으면 재연결"을 구현할 수 없다.
 >
-> ⚠️ **`different` 피드백은 살아 있는 카드가 있으면 새 카드를 만들지 않는다** (룰 9).
-> 기존 카드의 `pending_feedbacks`로 붙고 담당자가 저장할 때 함께 해소된다. 알림은 그래도
-> 보내야 한다 — "카드가 안 생겼으니 알릴 것도 없다"가 아니다.
+> ⚠️ **SSE 스트림은 요청 세션을 붙잡지 않는다.** FastAPI 의 `yield` 의존성은 스트리밍이 끝날
+> 때까지 정리되지 않으므로 `Depends(get_db)` 를 쓰면 접속자 몇 명으로 커넥션 풀이 마른다.
+> `sse_stream_service.session_factory` 로 자체 세션을 열고 즉시 닫는다(테스트 교체 지점).
 >
-> ⚠️ **재사용 답변은 원본의 사본이다** (D21). 공식 Q&A가 `under_review`로 내려가면 사본도
-> 내려가고, 해소되면 사본의 **본문까지 원본의 현재 값으로 맞춘다**(`official_qa_service.restore`).
-> 본문이 바뀐 사본의 질문자에게 `answer.corrected`를 보내는 것이 M5 몫이다.
+> ⚠️ **httpx `ASGITransport` 는 스트리밍을 버퍼링한다**(실측 0.28.1) — 끝나지 않는 SSE 는
+> `client.stream()` 으로도 한 줄을 못 읽고 테스트가 멈춘다. `tests/test_sse.py` 는 수명이 짧은
+> access token 으로 서버가 스스로 끊게 만들어 검증한다.
 
 ```
-@prompts/AUTORUN.md @prompts/05-notifications-sse.md
-
-두 문서를 읽고 M5 알림·SSE를 실행해줘.
+@prompts/AUTORUN.md @prompts/09-seed-deploy.md
 
 AUTORUN.md가 실행 규약이다. 특히 §3 "반드시 질문해야 하는 상황"을 지켜줘 —
-사양이 갈리거나, 실측이 문서를 뒤집거나, 외부 계정·비가역 작업이 필요하거나,
-DoD가 안 닫히거나, 스코프가 애매하면 추측하지 말고 AskUserQuestion으로 물어봐.
-반대로 §4에 있는 것들(문서에 답이 있는 것, 관례적 판단)은 묻지 말고 그냥 진행해.
+특히 §3.3(외부 계정·비가역 작업)이 이번 세션의 핵심이다. 배포는 되돌리기 어렵고
+Railway 계정·환경변수 설정이 필요하니 실행 전에 확인받아라.
 
-M0~M4는 이미 끝났다. 카드 큐·피드백·공식 Q&A·재검토 연쇄가 돌아간다.
-알림을 붙일 자리는 grep -rn "TODO(M5)" app/ 로 전부 나온다 — 그 자리에 넣어라.
-🟢 카드 알림 제외 판정은 review_card_service.notifies_answerer 가 이미 한다.
-브리핑 시각 계산은 dnd.next_briefing_at 을 써라(M6와 공유한다).
-좀비 회수 잡의 실패 카드는 review_card_service.create_card 로 만든다.
+09-seed-deploy.md 중 **배포 부분만 먼저** 실행해줘. 시드(scripts/seed.py)는 M9 세션이다.
 
-⚠️ --workers 1 고정. SSE 큐가 인메모리고 APScheduler가 워커마다 중복 발화한다.
-⚠️ 만료 스위퍼는 살아 있는 카드(pending·deferred) 밑의 답변을 죽이지 않는다(D14).
-⚠️ DND 강등 대상은 low_confidence 뿐이다. 강제 🔴 4종은 DND에서도 🔴 유지(D2).
-⚠️ 알림 title/body는 수신자 users.language로 서버가 만든다(05 §1.5).
+M0~M5는 끝났다. 마이그레이션 head는 0006이고 pytest 316 passed다.
+배포에서 특별히 확인할 것:
+- Railway Postgres에 CREATE EXTENSION vector (M-1에서 권한 확인됨, 03 §6)
+- 시작 커맨드에 --workers 1 고정 (SSE 인메모리 큐 + APScheduler 중복 발화)
+- alembic upgrade head 선행
+- SSE 프록시 통과 확인 — Railway는 15분에 강제 종료한다(정상 동작, 05 §12.2)
+- STORAGE_DIR는 컨테이너 내 절대 경로
 
-M5 DoD(SSE 이벤트 수신 테스트, DND 강등 테스트 — 강제 🔴 4종 비강등 포함)를
-하나씩 확인하고, 통과하면 커밋하고, START-HERE.md 세션표를 갱신한 뒤
-보고하고 멈춰줘. 다음은 클라우드 배포 1차다(새 세션).
+끝나면 클라우드 URL에서 /health와 /docs를 확인하고, START-HERE.md 세션표를
+갱신한 뒤 보고하고 멈춰줘. 다음은 M6 브리핑·교훈이다(새 세션).
 ```
 
 > 이후 마일스톤도 같은 형태다 — `@prompts/AUTORUN.md @prompts/01-auth-projects.md` 처럼

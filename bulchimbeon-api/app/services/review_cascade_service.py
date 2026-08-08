@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document import Chunk, Document, DocumentVersion
 from app.models.official_qa import OfficialQA
+from app.models.project import Project
 from app.models.question import (
     ANSWER_STATE_UNDER_REVIEW,
     ANSWER_STATE_VERIFIED,
@@ -24,7 +25,13 @@ from app.models.question import (
     Question,
 )
 from app.models.review_card import CARD_REASON_DOC_UPDATE
-from app.services import event_service, official_qa_service, review_card_service
+from app.services import (
+    event_service,
+    notification_service,
+    official_qa_service,
+    review_card_service,
+    sse_manager,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +72,15 @@ async def cascade_for_document(
             reason=CARD_REASON_DOC_UPDATE,
             document_version_id=trigger_version_id,
         )
+        # 재검토 전이를 질문자에게 알린다 (`05 §12.3` `answer.updated`). `04 §4` 에 재검토용
+        # 알림 타입이 없으므로 이 이벤트가 통지 경로다.
+        sse_manager.queue_answer_updated(
+            db,
+            asker_id=question.asker_id,
+            question_id=question.id,
+            answer_id=answer.id,
+            state=ANSWER_STATE_UNDER_REVIEW,
+        )
     await db.flush()
 
     await _cascade_official_qas(
@@ -88,7 +104,18 @@ async def cascade_for_document(
             "archived_official_qas": archive_official_qas,
         },
     )
-    # TODO(M5): 담당자에게 `doc.review_needed` 알림 (`04 §4`, 룰 5).
+    # 담당자에게 "이 문서를 근거로 한 확정 답변 N건이 재검토 대상입니다" (룰 5, `04 §4`).
+    # 룰 5 가 "직후"를 요구하므로 즉시 발송이며, DND 구간이면 함께 보류된다 (룰 6).
+    project = await db.get(Project, document.project_id)
+    if project is not None:
+        await notification_service.notify_doc_review_needed(
+            db,
+            project=project,
+            document_id=document.id,
+            document_title=document.title,
+            document_version_id=trigger_version_id,
+            count=len(answers),
+        )
     # TODO(M6): 이 문서에서 나온 교훈에 `needs_recheck=true` (룰 5). lessons 테이블은 M6 범위다.
     return len(answers)
 

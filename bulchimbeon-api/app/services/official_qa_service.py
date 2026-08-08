@@ -23,6 +23,7 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFound
+from app.models.notification import NOTIFICATION_ANSWER_CORRECTED
 from app.models.official_qa import (
     OFFICIAL_QA_STATUS_ACTIVE,
     OFFICIAL_QA_STATUS_ARCHIVED,
@@ -42,7 +43,7 @@ from app.schemas.official_qa import (
     OfficialQAListItem,
     OfficialQAListResponse,
 )
-from app.services import event_service
+from app.services import event_service, notification_service, sse_manager
 from app.services.llm import get_provider
 
 logger = logging.getLogger(__name__)
@@ -139,8 +140,8 @@ async def suspend(db: AsyncSession, official_qa: OfficialQA, *, project_id: UUID
     for answer in reused:
         if answer.state == ANSWER_STATE_VERIFIED:
             answer.state = ANSWER_STATE_UNDER_REVIEW
+            await _notify_answer_updated(db, answer)
     await db.flush()
-    # TODO(M5): 재사용 답변의 질문자에게 재검토 알림 (`04 §4`, D21).
     return len(reused)
 
 
@@ -155,13 +156,52 @@ async def restore(db: AsyncSession, official_qa: OfficialQA, *, project_id: UUID
 
     reused = await _reused_answers(db, official_qa.id)
     for answer in reused:
+        # **본문이 실제로 바뀐 사본에만** 정정 알림을 보낸다 (D21). 유지(`keep`)로 해소된
+        # 경우는 원문이 그대로이므로 "정정되었습니다"가 거짓이 된다.
+        corrected = answer.content_ko != official_qa.answer_ko
+        restored = answer.state == ANSWER_STATE_UNDER_REVIEW
+
         answer.content_ko = official_qa.answer_ko
         answer.content_en = official_qa.answer_en
-        if answer.state == ANSWER_STATE_UNDER_REVIEW:
+        if restored:
             answer.state = ANSWER_STATE_VERIFIED
+
+        # 바뀐 게 없으면 알리지 않는다 — 재확정마다 모든 사본에 갱신 신호를 뿌리면
+        # 프론트가 무의미한 재조회를 반복한다 (`05 §12.2` 는 수신 시 전량 재조회를 규정한다).
+        if not (corrected or restored):
+            continue
+
+        await _notify_answer_updated(db, answer)
+        if corrected:
+            question = await db.get(Question, answer.question_id)
+            if question is not None:
+                await notification_service.notify_answer_resolved(
+                    db,
+                    question=question,
+                    answer=answer,
+                    type=NOTIFICATION_ANSWER_CORRECTED,
+                )
     await db.flush()
-    # TODO(M5): 본문이 바뀐 재사용 답변의 질문자에게 `answer.corrected` 알림 (`04 §4`).
     return len(reused)
+
+
+async def _notify_answer_updated(db: AsyncSession, answer: Answer) -> None:
+    """`05 §12.3` `answer.updated` — 재검토·복귀 전이를 질문자에게 알린다.
+
+    `04 §4` 의 알림 타입 어휘에는 "재검토로 내려갔다"에 해당하는 것이 없다(§11 이 어휘를 닫아
+    두었고 계약에 없는 타입을 만들지 않는다). §12.3 이 `answer.updated` 의 수신자를 질문자로,
+    사유를 "확정/정정/반려/**재검토**"로 명시하므로 이 이벤트가 그 통지 경로다.
+    """
+    question = await db.get(Question, answer.question_id)
+    if question is None:  # FK 가 보장한다.
+        return
+    sse_manager.queue_answer_updated(
+        db,
+        asker_id=question.asker_id,
+        question_id=question.id,
+        answer_id=answer.id,
+        state=answer.state,
+    )
 
 
 async def archive(

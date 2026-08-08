@@ -6,6 +6,7 @@
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import Depends
@@ -14,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenRole, NotFound, NotMember, Unauthorized
-from app.core.security import ACCESS_TOKEN_TYPE, decode_token
+from app.core.security import ACCESS_TOKEN_TYPE, access_token_expires_at, decode_token
 from app.database import get_db
 from app.models.document import Document
 from app.models.official_qa import OfficialQA
@@ -47,6 +48,20 @@ async def get_current_user(
         # 서명은 유효하지만 유저가 사라진 토큰. 401 로 재로그인을 유도한다.
         raise Unauthorized()
     return user
+
+
+async def get_access_token_expiry(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+) -> datetime:
+    """현재 access token 의 만료 시각 — `POST /sse/ticket` 만 쓴다 (`05 §12.2` 4번).
+
+    스트림은 이 시각에 서버가 끊고 프론트는 refresh 후 새 티켓으로 재연결한다. `get_current_user`
+    와 헤더를 두 번 읽지만, 만료 시각을 유저 객체에 얹어 다니면 모든 라우터가 쓰지 않는 값을
+    들고 다니게 된다.
+    """
+    if credentials is None or not credentials.credentials:
+        raise Unauthorized()
+    return access_token_expires_at(credentials.credentials)
 
 
 async def _active_membership(db: AsyncSession, project_id: UUID, user: User) -> ProjectMember:

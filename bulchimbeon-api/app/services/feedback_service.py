@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import DuplicateFeedback
 from app.models.official_qa import OfficialQA
+from app.models.project import Project
 from app.models.question import ANSWER_STATE_UNDER_REVIEW, Answer, Question
 from app.models.review_card import (
     CARD_REASON_FEEDBACK,
@@ -26,7 +27,14 @@ from app.models.review_card import (
 )
 from app.models.user import User
 from app.schemas.question import FeedbackCreate, FeedbackResponse, FeedbackSummary
-from app.services import answer_service, event_service, official_qa_service, review_card_service
+from app.services import (
+    answer_service,
+    event_service,
+    notification_service,
+    official_qa_service,
+    review_card_service,
+    sse_manager,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +95,7 @@ async def submit(
     if payload.verdict == FEEDBACK_CORRECT:
         await _on_correct(db, answer)
     else:
-        await _on_different(db, question=question, answer=answer)
+        await _on_different(db, question=question, answer=answer, feedback=feedback)
 
     summary = await summary_for_answer(db, answer.id, viewer_id=user.id)
     return FeedbackResponse(
@@ -128,7 +136,9 @@ async def _on_correct(db: AsyncSession, answer: Answer) -> None:
     await db.flush()
 
 
-async def _on_different(db: AsyncSession, *, question: Question, answer: Answer) -> None:
+async def _on_different(
+    db: AsyncSession, *, question: Question, answer: Answer, feedback: Feedback
+) -> None:
     """달랐다 — 답변(및 연결 공식 Q&A) 재검토 전환 (룰 3, D7·D21).
 
     확정된 답변에도 "달랐다"를 누를 수 있다. 그 경우 해당 공식 Q&A 는 재사용을 멈추고,
@@ -136,6 +146,16 @@ async def _on_different(db: AsyncSession, *, question: Question, answer: Answer)
     """
     answer.state = ANSWER_STATE_UNDER_REVIEW
     await db.flush()
+
+    # `05 §12.3` — 재검토 전이는 `answer.updated` 로 질문자에게 알린다. `04 §4` 에 재검토용
+    # 알림 타입이 없으므로(어휘가 닫혀 있다) 이 이벤트가 통지 경로다.
+    sse_manager.queue_answer_updated(
+        db,
+        asker_id=question.asker_id,
+        question_id=question.id,
+        answer_id=answer.id,
+        state=answer.state,
+    )
 
     if answer.official_qa_id is not None:
         official_qa = await db.get(OfficialQA, answer.official_qa_id)
@@ -149,7 +169,15 @@ async def _on_different(db: AsyncSession, *, question: Question, answer: Answer)
         await review_card_service.create_card(
             db, question=question, answer=answer, reason=CARD_REASON_FEEDBACK
         )
-    # TODO(M5): 담당자에게 `feedback.different` 알림 (`04 §4`).
+
+    # ⚠️ **카드를 새로 만들지 않았어도 알림은 보낸다** (룰 9). "카드가 안 생겼으니 알릴 것도
+    # 없다"로 두면 담당자가 재검토 요청을 영영 모른다 — 기존 카드를 이미 열어 본 뒤라면
+    # `pending_feedbacks` 를 다시 볼 이유가 생기지 않는다.
+    project = await db.get(Project, question.project_id)
+    if project is not None:
+        await notification_service.notify_feedback_different(
+            db, project=project, question=question, answer=answer, feedback=feedback
+        )
 
 
 async def _correct_count(db: AsyncSession, answer_id: UUID) -> int:

@@ -14,7 +14,7 @@ from app.schemas.auth import (
     TokenResponse,
     UserOut,
 )
-from app.services import auth_service
+from app.services import auth_service, notification_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -46,6 +46,8 @@ async def me(
     return MeResponse(
         user=UserOut.model_validate(user),
         projects=projects,
-        # 원천 테이블(notifications)은 M5 에서 생긴다. 계약상 필드이므로 shape 은 지킨다.
-        unread_notifications_total=0,
+        # ⚠️ 프로젝트별 합이 아니다 — 알림함은 **전 프로젝트** 스코프이고(`05 §11`) 탈퇴한
+        # 프로젝트(`member_status='left'`)는 위 목록에서 빠지므로(D18) 그 알림이 합에서
+        # 사라지면 뱃지와 알림함 목록의 개수가 어긋난다.
+        unread_notifications_total=await notification_service.unread_count(db, user.id),
     )

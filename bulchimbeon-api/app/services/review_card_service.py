@@ -21,6 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import DEFAULT_SETTINGS
 from app.core.errors import AlreadyResolved, InvalidCardAction, NotFound, ValidationError
+from app.models.notification import (
+    NOTIFICATION_ANSWER_CORRECTED,
+    NOTIFICATION_ANSWER_KEPT,
+    NOTIFICATION_ANSWER_REJECTED,
+    NOTIFICATION_ANSWER_VERIFIED,
+)
 from app.models.project import Project
 from app.models.question import (
     ANSWER_STATE_REJECTED,
@@ -67,7 +73,13 @@ from app.schemas.review_card import (
     SelectedOption,
     preview,
 )
-from app.services import answer_service, event_service, official_qa_service
+from app.services import (
+    answer_service,
+    event_service,
+    notification_service,
+    official_qa_service,
+    sse_manager,
+)
 from app.services.llm import get_provider
 from app.services.pipeline import dnd
 
@@ -115,6 +127,17 @@ _EVENT_BY_ACTION = {
     ACTION_KEEP: event_service.EVENT_CARD_KEPT,
     ACTION_REJECT: event_service.EVENT_CARD_REJECTED,
 }
+
+# `04 §4` — 처리 결과를 **질문자에게** 알리는 타입. `05 §7.1` 의 액션과 1:1 이다.
+# `answer-option` 은 `edit` 과 동일 처리이므로(`05 §7.2`) 같은 정정 알림을 쓴다.
+_ASKER_NOTIFICATION_BY_ACTION = {
+    ACTION_APPROVE: NOTIFICATION_ANSWER_VERIFIED,
+    ACTION_EDIT: NOTIFICATION_ANSWER_CORRECTED,
+    ACTION_ANSWER_OPTION: NOTIFICATION_ANSWER_CORRECTED,
+    ACTION_KEEP: NOTIFICATION_ANSWER_KEPT,
+    ACTION_REJECT: NOTIFICATION_ANSWER_REJECTED,
+}
+_CORRECTING_ACTIONS = (ACTION_EDIT, ACTION_ANSWER_OPTION)
 
 # 파이프라인 등급 → 카드 reason (`04 §2`).
 CARD_REASON_BY_GRADE = {
@@ -504,6 +527,16 @@ async def resolve_card(
         payload=event_payload,
     )
 
+    await _notify_resolution(
+        db,
+        card=card,
+        question=question,
+        project=project,
+        answer=answer,
+        action=action,
+        reason_en=reason_en,
+    )
+
     payload = {
         "answer": _to_card_answer(answer),
         "official_qa_id": official_qa_id,
@@ -514,6 +547,59 @@ async def resolve_card(
     if selected is not None:
         return CardAnswerOptionResponse(**payload, selected_option=selected)
     return CardActionResponse(**payload)
+
+
+async def _notify_resolution(
+    db: AsyncSession,
+    *,
+    card: ReviewCard,
+    question: Question,
+    project: Project,
+    answer: Answer | None,
+    action: str,
+    reason_en: str | None,
+) -> None:
+    """카드 처리 결과 통지 (`04 §4`, `05 §12.3`).
+
+    ⚠️ `_mark_resolved` **이후에** 부른다 — `card.resolution` 이 `card.resolved` 이벤트의
+    payload 이기 때문이다.
+
+    - 질문자: `answer.verified` / `answer.corrected` / `answer.kept` / `answer.rejected` 알림 +
+      `answer.updated` SSE.
+    - 담당자: `card.resolved` SSE(다른 기기 동기화) + **정정일 때만** `answer.corrected` 알림.
+      정정 알림을 양쪽 언어로 보내라는 룰 8 의 구현이 이 두 번째 레코드다.
+    - `defer` 는 여기 오지 않는다 — 질문자 화면은 "확인 대기 중"을 유지하고(룰 9) `04 §4` 에
+      대응하는 알림 타입이 없다.
+    """
+    await notification_service.notify_answer_resolved(
+        db,
+        question=question,
+        answer=answer,
+        type=_ASKER_NOTIFICATION_BY_ACTION[action],
+        card_id=card.id,
+        reason_en=reason_en,
+    )
+
+    if action in _CORRECTING_ACTIONS and answer is not None:
+        await notification_service.notify_answer_corrected_to_answerer(
+            db, question=question, answer=answer, project=project, card_id=card.id
+        )
+
+    if answer is not None:
+        sse_manager.queue_answer_updated(
+            db,
+            asker_id=question.asker_id,
+            question_id=question.id,
+            answer_id=answer.id,
+            state=answer.state,
+        )
+    if project.answerer_id is not None:
+        sse_manager.queue_card_resolved(
+            db,
+            answerer_id=project.answerer_id,
+            card_id=card.id,
+            resolution=card.resolution,
+        )
 
 
 def _selected_option(card: ReviewCard, option_index: int | None) -> tuple[str, SelectedOption]:
@@ -722,15 +808,19 @@ async def bulk_keep(
         ).all()
     )
 
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise NotFound()
+
     resolved_feedbacks = 0
     for card in cards:
         answer = await db.get(Answer, card.answer_id) if card.answer_id is not None else None
+        question = await db.get(Question, card.question_id)
         if answer is not None:
             answer_service.ensure_confirmable(answer)
             _confirm(answer, actor)
             await db.flush()
 
-            question = await db.get(Question, card.question_id)
             if question is not None:
                 await official_qa_service.incorporate(
                     db, question=question, answer=answer, project_id=project_id
@@ -749,6 +839,19 @@ async def bulk_keep(
             entity_id=card.question_id,
             payload={"card_id": str(card.id), "bulk": True},
         )
+
+        # 묶음 액션이라도 통지는 **카드 하나씩**이다 — 질문자가 서로 다르다 (`04 §4`).
+        # 응답만 건수로 줄이는 것이고(`05 §7.4`) 알림을 합치는 것은 아니다.
+        if question is not None:
+            await _notify_resolution(
+                db,
+                card=card,
+                question=question,
+                project=project,
+                answer=answer,
+                action=ACTION_KEEP,
+                reason_en=None,
+            )
 
     return BulkKeepResponse(
         document_version_id=document_version_id,

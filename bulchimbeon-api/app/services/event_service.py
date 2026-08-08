@@ -27,6 +27,9 @@ EVENT_ANSWER_REUSED = "answer.reused"
 #    이게 없으면 분모가 만들어지지 않아 지표가 항상 100% 로 보인다.
 EVENT_ANSWER_REUSE_MISSED = "answer.reuse_missed"
 
+# M5 만료 스위퍼 (`04 §5`, D14). 발행 주체는 스케줄러이므로 `actor_id` 는 항상 NULL(system)이다.
+EVENT_ANSWER_EXPIRED = "answer.expired"
+
 # M4 확인 워크플로 (`04 §5`).
 #
 # ⚠️ 카드·공식 Q&A 이벤트는 **질문 스코프**로 남긴다 — `05 §13` 의 타임라인 조회가

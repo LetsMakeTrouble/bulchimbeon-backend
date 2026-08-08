@@ -11,6 +11,7 @@
 
 from app.models.document import Chunk, Document, DocumentVersion
 from app.models.event import Event
+from app.models.notification import Notification
 from app.models.official_qa import OfficialQA
 from app.models.project import Guideline, Project, ProjectMember
 from app.models.question import Answer, AnswerCitation, Question
@@ -26,6 +27,7 @@ __all__ = [
     "Event",
     "Feedback",
     "Guideline",
+    "Notification",
     "OfficialQA",
     "Project",
     "ProjectMember",

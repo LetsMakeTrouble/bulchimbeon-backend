@@ -20,7 +20,7 @@ from sqlalchemy.pool import NullPool
 
 from app.config import settings
 from app.database import Base, create_engine, get_db
-from app.services import llm
+from app.services import llm, sse_manager, sse_stream_service, sse_ticket_service
 from app.services.llm.fake_provider import FakeLLMProvider
 from app.services.pipeline import answer as answer_pipeline
 from app.services.pipeline import ingest, quota
@@ -177,6 +177,9 @@ async def task_session_factory(db_connection: AsyncConnection) -> AsyncIterator[
 
     ⚠️ 질문 파이프라인은 **실패 기록용 세션을 따로 연다**(예외가 난 세션 위에서는 커밋할 수
     없기 때문). 그것도 같은 팩토리를 거치므로 여기 한 곳만 갈아끼우면 된다.
+
+    SSE 스트림도 같은 이유로 자체 세션을 쓴다 — 요청 세션을 스트림 수명(최대 30분) 동안
+    붙잡으면 커넥션 풀이 마른다 (`services/sse_stream_service.py` 독스트링).
     """
 
     def factory() -> AsyncSession:
@@ -186,13 +189,35 @@ async def task_session_factory(db_connection: AsyncConnection) -> AsyncIterator[
             expire_on_commit=False,
         )
 
-    originals = (ingest.session_factory, answer_pipeline.session_factory)
+    originals = (
+        ingest.session_factory,
+        answer_pipeline.session_factory,
+        sse_stream_service.session_factory,
+    )
     ingest.session_factory = factory
     answer_pipeline.session_factory = factory
+    sse_stream_service.session_factory = factory
     try:
         yield
     finally:
-        ingest.session_factory, answer_pipeline.session_factory = originals
+        (
+            ingest.session_factory,
+            answer_pipeline.session_factory,
+            sse_stream_service.session_factory,
+        ) = originals
+
+
+@pytest.fixture(autouse=True)
+def reset_sse_state() -> Iterator[None]:
+    """SSE 티켓 저장소와 구독자 큐는 **프로세스 메모리**다 (룰 9 `--workers 1` 전제).
+
+    비우지 않으면 앞선 테스트가 남긴 티켓·구독이 뒤 테스트에 섞인다.
+    """
+    sse_ticket_service.reset()
+    sse_manager.reset()
+    yield
+    sse_ticket_service.reset()
+    sse_manager.reset()
 
 
 @pytest.fixture(autouse=True)

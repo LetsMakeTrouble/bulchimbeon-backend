@@ -41,7 +41,13 @@ from app.schemas.question import (
     QuestionListResponse,
     SimilarOfficialQA,
 )
-from app.services import answer_service, event_service, feedback_service, review_card_service
+from app.services import (
+    accuracy_service,
+    answer_service,
+    event_service,
+    feedback_service,
+    review_card_service,
+)
 
 # `05 §1.5` — 수신자 언어로 서버가 만드는 문자열. 코드 분기는 프론트가 하지 않는다.
 _DISCLAIMER = {
@@ -279,7 +285,7 @@ async def get_detail(db: AsyncSession, question: Question, viewer: User) -> Ques
         )
     elif question.status == QUESTION_STATUS_ANSWERED and answer is not None:
         # 🔴 보류(`held`)·처리 중에는 답변을 내보내지 않는다. 초안은 카드에서만 노출된다.
-        answer_out = await _to_answer_out(db, answer, viewer)
+        answer_out = await _to_answer_out(db, question, answer, viewer)
 
     return QuestionDetail(
         id=question.id,
@@ -321,7 +327,9 @@ async def _similar_official_qa(db: AsyncSession, answer: Answer | None) -> Simil
     )
 
 
-async def _to_answer_out(db: AsyncSession, answer: Answer, viewer: User) -> AnswerOut:
+async def _to_answer_out(
+    db: AsyncSession, question: Question, answer: Answer, viewer: User
+) -> AnswerOut:
     reused = answer.source == ANSWER_SOURCE_REUSED
 
     official_qa_ref: OfficialQARef | None = None
@@ -352,6 +360,13 @@ async def _to_answer_out(db: AsyncSession, answer: Answer, viewer: User) -> Answ
             db, answer.id, viewer_id=viewer.id
         ),
         official_qa=official_qa_ref,
+        # `05 §6` — 이 답변 등급의 실측 정확도 (D25). 표본 30건 미만이면 숫자 대신 "표본 부족"이다.
+        accuracy_context=await accuracy_service.for_grade(
+            db,
+            project_id=question.project_id,
+            grade=answer.grade,
+            language=viewer.language,
+        ),
     )
 
 

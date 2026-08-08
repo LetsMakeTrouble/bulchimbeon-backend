@@ -106,6 +106,34 @@ class Citation(BaseModel):
     similarity: float
 
 
+class GradeAccuracy(BaseModel):
+    """등급별 실측 정확도 (D25) — `(verified 또는 correct 피드백 ≥1건) / 해당 등급 전체 발행 수`.
+
+    `05 §6` `answer.accuracy_context` 와 `05 §13` `metrics.grade_accuracy[]` 가 **동일한 아이템
+    shape** 이라고 계약서가 못박았으므로 정의를 한 곳에만 둔다. 두 파일에 각자 정의하면 M7 에서
+    필드 하나가 어긋나고 그 차이는 프론트가 화면에서 발견한다. (이 모듈이 스키마 계층의
+    바닥이라 여기 둔다 — `schemas/review_card.py` 도 `Grade`·`Citation` 을 여기서 가져간다.)
+
+    ⚠️ **표본 30건 미만이면 `verified_rate` 는 반드시 `null`** 이고 `sufficient=false` 이며
+    `message` 가 채워진다. 데모 규모에서 나온 비율을 정확도로 읽히게 두지 않는 것이 이 지표의
+    존재 이유다 — 프론트는 `sufficient:false` 면 `%` 대신 `message` 를 표시한다.
+    """
+
+    grade: Grade
+    verified_rate: float | None
+    sample: int
+    window_days: int
+    sufficient: bool
+    message: str | None
+
+    @model_validator(mode="after")
+    def _rate_absent_when_insufficient(self) -> "GradeAccuracy":
+        """숫자와 "표본 부족"이 동시에 내려가면 프론트가 어느 쪽을 믿어야 할지 알 수 없다."""
+        if not self.sufficient and self.verified_rate is not None:
+            raise ValueError("sufficient=false 인 아이템의 verified_rate 는 null 이어야 한다.")
+        return self
+
+
 class AnswerOut(BaseModel):
     id: UUID
     grade: Grade
@@ -122,6 +150,8 @@ class AnswerOut(BaseModel):
     citations: list[Citation]
     feedback_summary: FeedbackSummary
     official_qa: "OfficialQARef | None" = None
+    # `05 §6` 정확도 실적 표기(선택 노출). §13 `metrics.grade_accuracy[]` 와 동일 shape 이다.
+    accuracy_context: GradeAccuracy | None = None
 
 
 class OfficialQARef(BaseModel):

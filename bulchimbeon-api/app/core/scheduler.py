@@ -18,16 +18,18 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.database import AsyncSessionLocal
-from app.services import sweeper_service
+from app.services import briefing_dispatch_service, sweeper_service
 
 logger = logging.getLogger(__name__)
 
-# `06 §4` 주기표. 만료 스위퍼 10분 · 좀비 회수 5분.
+# `06 §4` 주기표. 만료 스위퍼 10분 · 좀비 회수 5분 · 아침 브리핑 매 정시 체크.
 EXPIRY_SWEEPER_MINUTES = 10
 ZOMBIE_RECOVERY_MINUTES = 5
+BRIEFING_MINUTES = 60
 
 JOB_EXPIRY_SWEEPER = "expiry_sweeper"
 JOB_ZOMBIE_RECOVERY = "zombie_recovery"
+JOB_BRIEFING = "briefing"
 
 
 async def run_expiry_sweeper() -> None:
@@ -55,6 +57,22 @@ async def run_zombie_recovery() -> None:
         logger.exception("좀비 회수 잡 실패")
 
 
+async def run_briefing() -> None:
+    """담당자 `briefing_hour` 에 도달한 프로젝트에 브리핑을 보낸다 (`06 §4`).
+
+    ⚠️ **커밋이 필수다.** `sse_manager` 는 아웃박스라 `briefing.ready` SSE 가 커밋 직후에야
+    나간다 — 커밋을 빠뜨리면 알림함 레코드까지 통째로 사라지고 로그도 남지 않는다.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            sent = await briefing_dispatch_service.dispatch_due_briefings(db)
+            await db.commit()
+        if sent:
+            logger.info("브리핑 잡: 프로젝트 %s개", len(sent))
+    except Exception:
+        logger.exception("브리핑 잡 실패")
+
+
 def create_scheduler() -> AsyncIOScheduler:
     """잡을 등록한 스케줄러를 돌려준다. 기동·정지는 앱 lifespan 이 한다 (`03 §3`).
 
@@ -77,6 +95,18 @@ def create_scheduler() -> AsyncIOScheduler:
         trigger="interval",
         minutes=ZOMBIE_RECOVERY_MINUTES,
         id=JOB_ZOMBIE_RECOVERY,
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        run_briefing,
+        trigger="interval",
+        # `06 §4` "매 정시 체크". 첫 실행이 기동 + 60분이라 틱이 정각에 딱 떨어지지 않지만,
+        # 발송 판정이 "정각 일치"가 아니라 "`briefing_hour` 도달 이후"라 그날 브리핑은 늦어도
+        # 다음 틱에 나간다 (`briefing_dispatch_service` 독스트링).
+        minutes=BRIEFING_MINUTES,
+        id=JOB_BRIEFING,
         replace_existing=True,
         coalesce=True,
         max_instances=1,

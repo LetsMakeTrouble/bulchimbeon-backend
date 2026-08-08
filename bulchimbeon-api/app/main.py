@@ -23,7 +23,9 @@ from app.core.upload_limit import UploadSizeLimitMiddleware
 from app.database import get_db
 from app.routers import (
     auth,
+    briefing,
     documents,
+    lessons,
     notifications,
     official_qas,
     projects,
@@ -107,7 +109,9 @@ def create_app() -> FastAPI:
     app.include_router(questions.router, prefix=API_V1_PREFIX)
     app.include_router(review_cards.router, prefix=API_V1_PREFIX)
     app.include_router(official_qas.router, prefix=API_V1_PREFIX)
+    app.include_router(lessons.router, prefix=API_V1_PREFIX)
     app.include_router(notifications.router, prefix=API_V1_PREFIX)
+    app.include_router(briefing.router, prefix=API_V1_PREFIX)
     app.include_router(sse.router, prefix=API_V1_PREFIX)
     return app
 

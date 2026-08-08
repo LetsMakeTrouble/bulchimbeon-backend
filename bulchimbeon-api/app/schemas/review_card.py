@@ -154,7 +154,8 @@ class CardActionResponse(BaseModel):
     """approve · edit · keep · reject 공통 shape (`05 §7.1`).
 
     - `official_qa_id` · `lesson_candidate_id` 는 해당 없으면 `null` 이다.
-      교훈 추출은 M6 범위이므로 지금은 항상 `null` 이다 (`07` M6).
+      `lesson_candidate_id` 는 **수정 확정(`edit`·`answer-option`)에만** 채워지며, 삭제된
+      교훈과 같은 내용이 뽑히면 후보를 만들지 않으므로 그때도 `null` 이다 (D8, 룰 7).
     - `resolved_feedbacks` 는 이 처리로 함께 해소된 미해소 피드백 건수다 (룰 9).
     """
 

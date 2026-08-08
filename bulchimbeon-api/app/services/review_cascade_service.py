@@ -27,6 +27,7 @@ from app.models.question import (
 from app.models.review_card import CARD_REASON_DOC_UPDATE
 from app.services import (
     event_service,
+    lesson_service,
     notification_service,
     official_qa_service,
     review_card_service,
@@ -83,13 +84,20 @@ async def cascade_for_document(
         )
     await db.flush()
 
+    answer_ids = [answer.id for answer in answers]
     await _cascade_official_qas(
         db,
         project_id=document.project_id,
-        answer_ids=[answer.id for answer in answers],
+        answer_ids=answer_ids,
         archive=archive_official_qas,
         actor_id=actor_id,
     )
+
+    # 룰 5 — 이 답변들에서 나온 교훈은 **지우지 않고 재확인 표시만** 붙인다. 근거가 바뀐
+    # 것과 원칙이 틀린 것은 다른 사건이고, 그 판단은 담당자 몫이다.
+    flagged = await lesson_service.flag_needs_recheck(db, answer_ids=answer_ids)
+    if flagged:
+        logger.info("교훈 %s건에 needs_recheck 표시: document=%s", flagged, document.id)
 
     await event_service.record_event(
         db,
@@ -116,7 +124,6 @@ async def cascade_for_document(
             document_version_id=trigger_version_id,
             count=len(answers),
         )
-    # TODO(M6): 이 문서에서 나온 교훈에 `needs_recheck=true` (룰 5). lessons 테이블은 M6 범위다.
     return len(answers)
 
 

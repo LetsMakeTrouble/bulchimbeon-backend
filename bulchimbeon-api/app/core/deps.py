@@ -18,6 +18,7 @@ from app.core.errors import ForbiddenRole, NotFound, NotMember, Unauthorized
 from app.core.security import ACCESS_TOKEN_TYPE, access_token_expires_at, decode_token
 from app.database import get_db
 from app.models.document import Document
+from app.models.lesson import LESSON_STATUS_DELETED, Lesson
 from app.models.official_qa import OfficialQA
 from app.models.project import (
     MEMBER_STATUS_ACTIVE,
@@ -296,6 +297,47 @@ async def require_official_qa_answerer(
     access: OfficialQAAccess = Depends(require_official_qa_member),
 ) -> OfficialQAAccess:
     """`DELETE /official-qas/{id}` 는 담당자 전용이다 (`05 §9`)."""
+    if access.member.role != ROLE_ANSWERER:
+        raise ForbiddenRole("담당자만 수행할 수 있습니다.")
+    return access
+
+
+@dataclass(frozen=True)
+class LessonAccess:
+    """`/lessons/{id}` 의 권한 확인 결과 (`05 §10`)."""
+
+    lesson: Lesson
+    member: ProjectMember
+
+
+async def require_lesson_member(
+    lesson_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LessonAccess:
+    """교훈을 읽어 소속 프로젝트를 알아낸 뒤 멤버십을 본다 (공식 Q&A 경로와 같은 규약).
+
+    ⚠️ 남의 프로젝트 교훈은 **404** 다 — 403 을 주면 그 id 의 존재가 새어 나간다.
+
+    ⚠️ **삭제된 교훈도 404** 다. `status='deleted'` 행은 `content_hash` 대조로 재생성을
+    막기 위한 묘비일 뿐이고(D8), `05 §10` 의 `status` 어휘는 candidate·approved 뿐이다 —
+    되살릴 수 있으면 담당자가 버린 원칙이 승인으로 부활해 D8 이 무력화된다.
+    """
+    lesson = await db.get(Lesson, lesson_id)
+    if lesson is None or lesson.status == LESSON_STATUS_DELETED:
+        raise NotFound()
+
+    try:
+        member = await _active_membership(db, lesson.project_id, user)
+    except NotMember:
+        raise NotFound() from None
+    return LessonAccess(lesson=lesson, member=member)
+
+
+async def require_lesson_answerer(
+    access: LessonAccess = Depends(require_lesson_member),
+) -> LessonAccess:
+    """`05 §10` 은 교훈 전 경로가 **담당자 전용**이다 — 승인·삭제 모두 담당자만 한다 (룰 7)."""
     if access.member.role != ROLE_ANSWERER:
         raise ForbiddenRole("담당자만 수행할 수 있습니다.")
     return access

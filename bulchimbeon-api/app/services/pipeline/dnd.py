@@ -17,7 +17,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
 
-_FALLBACK_TIMEZONE = "UTC"
+# 타임존 문자열이 깨졌을 때의 폴백. **이 모듈이 유일한 정본**이다 — 브리핑·알림 쪽이 각자
+# 복제해 두면 판정 기준이 조용히 갈린다 (타임존 단일 원천).
+FALLBACK_TIMEZONE = "UTC"
 
 
 def _parse_hhmm(value: str) -> time | None:
@@ -30,13 +32,19 @@ def _parse_hhmm(value: str) -> time | None:
         return None
 
 
-def _zone(timezone_name: str) -> ZoneInfo:
+def zone(timezone_name: str) -> ZoneInfo:
+    """담당자 타임존 문자열 → `ZoneInfo`. 깨졌으면 UTC 로 떨어뜨린다.
+
+    **공개 함수인 이유**: 브리핑 발송 잡(`briefing_dispatch_service`)과 브리핑 조회
+    (`briefing_service._local_date`)가 같은 판정을 쓴다. 각자 `try/except ZoneInfoNotFoundError`
+    를 재구현하면 깨진 타임존에서 DND 와 브리핑이 **서로 다른 날짜**를 보게 된다.
+    """
     try:
         return ZoneInfo(timezone_name)
     except (ZoneInfoNotFoundError, ValueError):
         # 타임존이 깨졌다고 파이프라인을 죽이지 않는다. UTC 로 판정하고 로그만 남긴다.
         logger.warning("알 수 없는 timezone=%r — UTC 로 판정한다", timezone_name)
-        return ZoneInfo(_FALLBACK_TIMEZONE)
+        return ZoneInfo(FALLBACK_TIMEZONE)
 
 
 def in_dnd_window(now: datetime, *, timezone_name: str, dnd_start: str, dnd_end: str) -> bool:
@@ -50,7 +58,7 @@ def in_dnd_window(now: datetime, *, timezone_name: str, dnd_start: str, dnd_end:
     if start is None or end is None or start == end:
         return False
 
-    local = now.astimezone(_zone(timezone_name)).time()
+    local = now.astimezone(zone(timezone_name)).time()
     if start < end:
         return start <= local < end
     return local >= start or local < end
@@ -95,8 +103,7 @@ def next_dnd_end_at(
     if end is None:  # in_dnd_window 가 이미 걸렀지만 타입을 좁힌다.
         return None
 
-    zone = _zone(timezone_name)
-    local = now.astimezone(zone)
+    local = now.astimezone(zone(timezone_name))
     candidate = local.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
     if candidate <= local:
         # 자정을 넘는 구간(`22:00~07:00`)에서 아직 자정 전이면 종료는 내일이다.
@@ -105,15 +112,18 @@ def next_dnd_end_at(
 
 
 def next_briefing_at(now: datetime, *, timezone_name: str, briefing_hour: int) -> datetime:
-    """다음 브리핑 시각(UTC) — `defer` 의 기본 만기다 (D15, `05 §7.3`).
+    """다음 브리핑 시각(UTC) — `defer` 의 기본 만기이자 비긴급 알림의 보류 만기다
+    (D15, `05 §7.3`, 룰 6).
 
-    타임존 판정이 DND 와 **같은 원천**(담당자 `users.timezone`)이라 여기 둔다. M6 의 브리핑
-    스케줄러도 이 함수를 쓴다 — 두 곳에서 따로 계산하면 담당자 교체 시 어긋난다.
+    타임존 판정이 DND 와 **같은 원천**(담당자 `users.timezone`)이라 여기 둔다.
 
-    이미 오늘 브리핑 시각을 지났으면 내일 같은 시각이다.
+    이미 오늘 브리핑 시각을 지났으면 내일 같은 시각이다 — 즉 **항상 미래**를 돌려준다.
+    ⚠️ 그래서 **M6 브리핑 발송 잡은 이 함수를 쓰지 않는다.** 그쪽이 필요한 판정은 "담당자
+    현지 날짜의 `briefing_hour` 를 이미 지났는가"인데 여기서는 그 답이 영원히 "아니오"다.
+    `briefing_dispatch_service` 는 현지 시각을 직접 보며, 두 곳이 공유하는 것은 이 함수가
+    아니라 **`zone()` 과 `settings.briefing_hour` 를 접는 방식**이다.
     """
-    zone = _zone(timezone_name)
-    local = now.astimezone(zone)
+    local = now.astimezone(zone(timezone_name))
     hour = min(23, max(0, int(briefing_hour)))
     candidate = local.replace(hour=hour, minute=0, second=0, microsecond=0)
     if candidate <= local:

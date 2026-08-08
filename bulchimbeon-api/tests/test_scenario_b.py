@@ -91,7 +91,7 @@ async def test_scenario_b_red_to_edit_to_reuse(
     assert confirmed_ko, "서버가 ko 를 만들어 확정 원문으로 고정한다 (D5)"
     assert len(fake_llm_provider.translate_calls) == translate_calls_before + 1
     assert body["official_qa_id"] is not None, "확정은 공식 Q&A 로 편입된다 (`06 §3`)"
-    assert body["lesson_candidate_id"] is None, "교훈 추출은 M6 범위다"
+    assert body["lesson_candidate_id"] is not None, "수정 확정은 교훈 후보를 만든다 (룰 7)"
     assert body["resolved_feedbacks"] == 0
 
     # --- ④ 질문자 관점 — 여기가 데모에서 처음 터지는 지점이다 -------------------------------

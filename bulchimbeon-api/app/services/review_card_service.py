@@ -76,6 +76,7 @@ from app.schemas.review_card import (
 from app.services import (
     answer_service,
     event_service,
+    lesson_service,
     notification_service,
     official_qa_service,
     sse_manager,
@@ -295,7 +296,7 @@ async def list_cards(
 
     return ReviewCardListResponse(
         items=[
-            _to_list_item(
+            to_list_item(
                 row[0], content_ko=row.content_ko, content_en=row.content_en, grade=row.grade
             )
             for row in rows
@@ -306,9 +307,14 @@ async def list_cards(
     )
 
 
-def _to_list_item(
+def to_list_item(
     card: ReviewCard, *, content_ko: str, content_en: str | None, grade: str | None
 ) -> ReviewCardListItem:
+    """큐 목록 아이템 (`05 §7`).
+
+    브리핑(`05 §8`)의 네 배열이 같은 아이템 스키마를 쓰므로(§8 상단) M6 브리핑 서비스가 이
+    함수를 그대로 재사용한다 — 배열마다 필드가 달라지면 프론트가 N+1 상세 호출을 하게 된다.
+    """
     return ReviewCardListItem(
         id=card.id,
         reason=card.reason,  # type: ignore[arg-type]
@@ -468,6 +474,12 @@ async def resolve_card(
         # D13 — 만료는 종착 상태다. 만료 답변의 카드 처리 시도는 409 (`06 §5` 테스트 7).
         answer_service.ensure_confirmable(answer)
 
+    # ⚠️ **여기서 원답을 붙잡아 둔다.** `_apply_edit` 이 `answer.content_en` 을 제자리에서
+    #    덮어쓰므로, 그 뒤에 읽으면 교훈 추출(룰 7 — 원답과 수정답의 **차이**)의 입력이
+    #    이미 사라진 뒤다. `None` 은 "답변 행 자체가 없었다"(`reason='failed'`, D23)를 뜻하며
+    #    강제 🔴 의 빈 초안(`""`)과는 다르다 (`lesson_service.extract_candidate`).
+    original_content_en = answer.content_en if answer is not None else None
+
     selected: SelectedOption | None = None
     if action == ACTION_ANSWER_OPTION:
         content_en, selected = _selected_option(card, option_index)
@@ -494,6 +506,19 @@ async def resolve_card(
             db, question=question, answer=answer, project_id=project.id
         )
         official_qa_id = official_qa.id if official_qa is not None else None
+
+    # 교훈 후보 추출 (룰 7, `06 §3`) — **수정 확정에만** 붙는다. `answer-option` 은 본문이
+    # 선택지 텍스트일 뿐 처리는 `edit` 과 완전히 동일하므로(`05 §7.2`) 함께 태운다.
+    lesson_candidate_id: UUID | None = None
+    if action in _CORRECTING_ACTIONS and answer is not None:
+        lesson = await lesson_service.extract_candidate(
+            db,
+            project=project,
+            question=question,
+            answer=answer,
+            original_content_en=original_content_en,
+        )
+        lesson_candidate_id = lesson.id if lesson is not None else None
 
     if action in (ACTION_APPROVE, ACTION_EDIT, ACTION_ANSWER_OPTION):
         await _answer_question(db, question)
@@ -540,8 +565,9 @@ async def resolve_card(
     payload = {
         "answer": _to_card_answer(answer),
         "official_qa_id": official_qa_id,
-        # 교훈 추출은 M6 범위다 (`07` M6). 계약서상 "해당 없으면 null" 이므로 지금은 항상 null.
-        "lesson_candidate_id": None,  # TODO(M6): 수정 확정 시 교훈 후보 추출 (`06 §3`)
+        # 수정 확정이 아니거나 삭제된 교훈과 같은 내용이면 `null` 이다
+        # (`05 §7.1` — 해당 없으면 null).
+        "lesson_candidate_id": lesson_candidate_id,
         "resolved_feedbacks": resolved_feedbacks,
     }
     if selected is not None:

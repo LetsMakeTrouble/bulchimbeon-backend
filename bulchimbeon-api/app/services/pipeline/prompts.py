@@ -8,7 +8,7 @@
 테스트는 그 결과로 임베딩을 재현한다 (`fake_provider` 독스트링).
 """
 
-from app.services.llm.fake_provider import SENTENCE_BLOCK_PREFIX
+from app.services.llm.fake_provider import LESSON_CORRECTED_PREFIX, SENTENCE_BLOCK_PREFIX
 from app.services.pipeline.retrieval import EvidenceChunk
 
 # `05 §6` `citations[].quote` — 원문 화면에서 하이라이트할 스니펫. 청크 전체를 싣지 않는다.
@@ -52,6 +52,16 @@ VERIFY_SYSTEM = (
     "- Return exactly one verdict per sentence, using the sentence's index."
 )
 
+LESSON_SYSTEM = (
+    "You extract one reusable lesson from an answerer's correction.\n"
+    "You are given a question, the answer the system originally produced, and the answer the "
+    "human expert confirmed instead.\n"
+    "- lesson: ONE English sentence stating the general principle that would have produced "
+    "the corrected answer.\n"
+    "- Write a rule that also applies to other questions, not a summary of this one case.\n"
+    "- No bullet, no quotes, no explanation — the sentence alone."
+)
+
 STRUCT_SYSTEM = (
     "You restructure a question for a busy human expert who will answer it in one pass.\n"
     "Write in English, in this order: background, then the question, then options.\n"
@@ -66,10 +76,30 @@ def guidelines_block(content: str | None) -> str:
     return content.strip() if content and content.strip() else "(none)"
 
 
-def lessons_block() -> str:
-    # TODO(M6): 승인 교훈 최신 30개를 주입하고 `last_used_at` 을 갱신한다 (`06 §3`).
-    #   M3 에서는 자리만 비워 둔다 — `06 §5` 테스트 8(삭제 교훈 재생성 차단)은 M6 범위다.
-    return "(none)"
+def lessons_block(lessons: list[str]) -> str:
+    """`[APPROVED LESSONS]` (`06 §3`).
+
+    ⚠️ 들어오는 것은 **`approved` 교훈뿐**이다 (룰 7 — 승인 전 교훈은 어디에도 쓰지 않는다).
+    후보를 여기 섞으면 담당자가 승인한 적 없는 원칙이 답변을 바꾸게 된다. 그 필터는
+    `lesson_service.load_for_prompt` 가 쥐고 있고 이 함수는 렌더링만 한다.
+    """
+    lines = [f"- {lesson.strip()}" for lesson in lessons if lesson.strip()]
+    return "\n".join(lines) if lines else "(none)"
+
+
+def lesson_user_prompt(*, question_en: str, original_en: str, corrected_en: str) -> str:
+    """교훈 추출 입력 — 원답 vs 수정답 + 질문 (`06 §3`).
+
+    ⚠️ 수정답을 **마지막**에 둔다. `FakeLLMProvider` 가 `LESSON_CORRECTED_PREFIX` 뒤를
+    잘라 결정적 교훈을 만들기 때문이다 (⑤ 의 `SENTENCE_BLOCK_PREFIX` 와 같은 공유 계약).
+    강제 🔴 의 초안은 빈 문자열이라 `original_en` 이 `""` 일 수 있다 — 그것도 "원답이
+    없었다"는 유효한 차이다.
+    """
+    return (
+        f"[QUESTION] {question_en}\n"
+        f"[ORIGINAL ANSWER] {original_en or '(none — the system held the question)'}\n"
+        f"{LESSON_CORRECTED_PREFIX}{corrected_en}"
+    )
 
 
 def evidence_block(evidence: list[EvidenceChunk], aliases: dict[str, EvidenceChunk]) -> str:

@@ -32,7 +32,7 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 | 4~5 | **M3 질문 파이프라인** ⭐ — **✅ 완료 2026-08-08** | ~~`@prompts/03-question-pipeline.md`~~ DoD 7/7, `feat(M3): question answering pipeline with grading` | ⛔ 불가 |
 | 6 | **M4 확인 워크플로** ⭐ — **✅ 완료 2026-08-08** | ~~`@prompts/04-review-workflow.md`~~ DoD 통과, `feat(M4): review workflow and knowledge loop` | ⛔ 불가 |
 | 7 | M5 알림·SSE — **✅ 완료 2026-08-08** | ~~`@prompts/05-notifications-sse.md`~~ DoD 6/6, `feat(M5): notifications, sse, expiry sweeper` | 컷 없음(전 범위) |
-| 8 | M6 브리핑·교훈 | `@prompts/06-briefing-lessons.md 실행해줘` | 컷 없음(전 범위) |
+| 8 | M6 브리핑·교훈 — **✅ 완료 2026-08-08** | ~~`@prompts/06-briefing-lessons.md`~~ DoD 8/8, `feat(M6): briefing scheduler and lesson memory` | 컷 없음(전 범위) |
 | 9 | M7 지표 | `@prompts/07-metrics-events.md 실행해줘` | 컷 없음(4종+정확도) |
 | 10 | M8 외부 연동 | `@prompts/08-integrations.md 실행해줘` | 컷 없음 (AUTORUN §1) |
 | 11 | M9 시드 | `@prompts/09-seed-deploy.md 의 시드 부분` | ⛔ 시드는 불가 |
@@ -57,79 +57,89 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 
 ## 다음 세션 프롬프트 (그대로 복붙)
 
-> ✅ **M5 알림·SSE는 2026-08-08에 완료됐다** (`feat(M5): notifications, sse, expiry sweeper`).
-> `pytest` **316 passed**(slow 포함), `ruff check`·`ruff format --check` 통과,
-> 마이그레이션 head는 **0006**. `alembic check` = "No new upgrade operations detected".
-> `grep -rn "TODO(M5)" app/` → **0건**.
+> ✅ **M6 브리핑·교훈은 2026-08-08에 완료됐다** (`feat(M6): briefing scheduler and lesson memory`).
+> `pytest` **356 passed**(slow 포함), `ruff check`·`ruff format --check` 통과,
+> 마이그레이션 head는 **0007**. `alembic check` = "No new upgrade operations detected".
+> `grep -rn "TODO(M6)" app/` → **0건**. 별도 리뷰 패스(`code-reviewer`+`verifier`) 통과.
 >
-> **M6·M8이 그대로 물려받는 것** (다시 만들지 마라)
-> - **SSE 발행은 트랜잭션 아웃박스다** (`services/sse_manager.py`). 서비스는
->   `sse_manager.enqueue(db, ...)`(또는 `queue_*` 헬퍼)로 **세션에 적재만** 하고, 실제 발행은
->   SQLAlchemy `after_commit` 훅이 한다. 라우터에서 flush 를 부를 필요가 없고 **불러서도 안 된다** —
->   커밋 전에 발행하면 프론트의 재조회가 커밋 전 상태를 읽는다.
-> - **`sse_manager.queue_briefing_ready` / `queue_sync_completed` 는 이미 있다.** 이벤트명과
->   payload 를 계약서(`05 §12.3`)에 맞춰 박아 둔 것이며 **호출부만 없다** —
->   M6 브리핑 스케줄러 / M8 동기화가 그 자리에서 부르면 된다.
-> - **보류 알림 flush 가 M6 몫이다.** 비긴급 `card.created`·`feedback.different` 는
->   `notifications.deliver_after` = 다음 브리핑 시각으로 적재돼 있고 **목록·카운트에 나타나지
->   않는다**. 브리핑 발송 시 `deliver_after <= now()` 인 것을 발행해야 알림이 나간다.
->   지금은 시각이 지나면 자동으로 노출되므로 "영원히 안 나가는" 상태는 아니다.
-> - **`notification_service.answerer_deliver_after(db, project=, immediate=)`** 가 룰 6 분기의
->   단일 구현이다(긴급→즉시 / 비긴급→브리핑 / DND→종료 이후). 브리핑 시각은
->   `dnd.next_briefing_at`, DND 종료는 `dnd.next_dnd_end_at` 이다.
+> **M7이 그대로 물려받는 것** (다시 만들지 마라)
+> - ⭐ **`metrics_service.auto_answer_rate(db, project_id=, window_days=)` 가 이미 있다.**
+>   `05 §13`의 `auto_answer_rate`는 이것을 **그대로** 쓴다 — 두 벌 만들면 브리핑
+>   `stats_snapshot`과 대시보드가 다른 숫자를 보여 준다. `grade_counts()`가 등급 분포
+>   `{green, yellow, red}`를 주므로 §13의 `{value, target, green, yellow, red}`가 바로 나온다.
+> - ⭐ **집계 원천은 `answers` 행이 아니라 `question.graded` 이벤트다** (룰 4 · `02 §10` ·
+>   `04 §5`). M6가 처음에 `answers.grade`로 짰다가 리뷰에서 되돌렸다. **갈리는 지점이 실재한다**:
+>   `reason='failed'` 카드에 `edit`하면 `_apply_edit`이 `grade=red`인 **새 Answer 행**을 만드는데
+>   그 답변에는 `question.graded`가 없다. M7 작업 1(이벤트 감사)이 정확히 이런 구멍을 찾는 일이다.
 > - **`accuracy_service.for_grade(db, project_id=, grade=, language=, window_days=)`** 가
->   등급별 실측 정확도(D25)의 유일한 구현이다. `05 §13` `grade_accuracy[]` 는 이것을 등급마다
->   불러 만들면 되고, 아이템 스키마는 `schemas/question.GradeAccuracy` 다(§6과 §13이 같은 shape).
-> - **`sweeper_service`** 에 만료 스위퍼·좀비 회수가 있고 둘 다 `now=` 를 주입받는다.
->   잡 등록은 `core/scheduler.py` — M6 브리핑 잡을 여기에 더한다.
+>   등급별 실측 정확도(D25)의 유일한 구현이다. `05 §13` `grade_accuracy[]`는 이것을 등급마다
+>   불러 만들고, 아이템 스키마는 `schemas/question.GradeAccuracy` 다(§6과 §13이 같은 shape).
+> - **`lesson.candidate` / `lesson.approved` / `lesson.deleted` 이벤트는 이미 기록된다.**
+>   `05 §13` timeseries의 `lessons_approved`가 여기 기댄다. `approve` 재호출 시 이벤트가
+>   중복되지 않도록 상태 가드가 들어가 있다 — 없으면 학습 곡선이 부풀려진다.
+> - **`review_card_service.to_list_item(...)`** 은 이제 public 이다. `05 §7` 큐 아이템과
+>   `05 §8` 브리핑 네 배열이 같은 함수를 쓴다.
+> - **`dnd.zone(timezone_name)` / `dnd.FALLBACK_TIMEZONE`** 이 public 이다. 깨진 타임존을
+>   UTC로 떨어뜨리는 판정은 이 하나뿐이다 — 복제하면 DND와 브리핑이 다른 날짜를 본다.
+> - **`briefing_dispatch_service`** 는 `now=`를 주입받는다. 잡 등록은 `core/scheduler.py`
+>   (만료 스위퍼 10분 · 좀비 회수 5분 · 브리핑 60분).
 >
-> ⚠️ **알림함 문자열은 수신자 `users.language` 로 만들어 저장한다** (`05 §1.5`).
-> 문안 표는 `notification_service` 상단에 ko/en 쌍으로 모여 있다. 새 타입을 만들 때
-> **계약서 어휘(`04 §4` 12종)를 벗어나지 마라** — `tests/test_notification_contract.py` 가
-> 문서를 파싱해 막는다.
+> ⚠️ **이벤트·알림 타입·SSE 이벤트·`settings` 키는 전부 닫힌 집합이다.**
+> `tests/test_notification_contract.py`가 `04 §4`와 `05 §12.3`을 **정규식으로 파싱해** 막고,
+> `tests/test_config.py`가 `DEFAULT_SETTINGS` 16개를 고정한다. 새로 만들려면 문서를 먼저 고쳐야 한다.
 >
-> ⚠️ **`event: ping` 은 우리가 직접 내보낸다** (`sse_stream_service.PING_INTERVAL_SECONDS`=14초).
-> FastAPI 네이티브 keepalive 는 `: ping` **주석**이라 브라우저 `EventSource` 가 관측할 수 없고,
-> `05 §12.2` 5번이 프론트에 요구한 "30초 넘게 ping 없으면 재연결"을 구현할 수 없다.
+> ⚠️ **브리핑 중복 발송은 락이 아니라 제약이다** — `briefing_runs`의 `UNIQUE(project_id, run_date)`
+> + `ON CONFLICT DO NOTHING` → `rowcount == 1`일 때만 발송. `SELECT`로 "오늘 보냈나"를 먼저 보고
+> 분기하는 코드를 넣지 마라(TOCTOU).
 >
-> ⚠️ **SSE 스트림은 요청 세션을 붙잡지 않는다.** FastAPI 의 `yield` 의존성은 스트리밍이 끝날
-> 때까지 정리되지 않으므로 `Depends(get_db)` 를 쓰면 접속자 몇 명으로 커넥션 풀이 마른다.
-> `sse_stream_service.session_factory` 로 자체 세션을 열고 즉시 닫는다(테스트 교체 지점).
+> ⚠️ **보류 알림 flush는 `deliver_after`를 `NULL`로 만든다.** 그게 "SSE 발행 완료" 마커다.
+> 안 지우면 `deliver_after <= now()`가 영원히 참이라 매일 같은 알림에 SSE를 재발행한다.
+> 가시성은 `_deliverable`이 이미 처리하므로 NULL화는 순수하게 발행 마커다.
 >
-> ⚠️ **httpx `ASGITransport` 는 스트리밍을 버퍼링한다**(실측 0.28.1) — 끝나지 않는 SSE 는
-> `client.stream()` 으로도 한 줄을 못 읽고 테스트가 멈춘다. `tests/test_sse.py` 는 수명이 짧은
-> access token 으로 서버가 스스로 끊게 만들어 검증한다.
+> ⚠️ **`content_hash` 정규화 구현은 `app/utils/hashing.py` 하나뿐이다** (D8).
+> 두 번째 구현이 생기면 "지운 교훈이 다시 올라온다"가 조용히 부활한다.
+>
+> 🔧 **M6가 남긴 알려진 미해결 2건** (커밋했고, 급하지 않다):
+> - `dispatch_due_briefings`가 전 프로젝트를 **한 트랜잭션**에서 돌고 커밋은 잡이 한 번 한다.
+>   한 프로젝트가 터지면 그 틱의 나머지도 롤백된다(다음 틱에 자가치유). 같은 함수에 N+1도 있다
+>   (프로젝트마다 `db.get(User, ...)`). 프로젝트 수가 적어 지금은 문제가 아니다.
+> - DND 때문에 건너뛴 브리핑은 **다음 날 `run_date`로 합쳐진다** — 그날 몫의 `briefing.ready`가
+>   따로 나가지 않는다. 밀린 알림은 그때 함께 flush되므로 유실은 없다.
+>   (`briefing_dispatch_service.py`에 근거가 주석으로 남아 있다.)
 
 ```
-@prompts/AUTORUN.md @prompts/06-briefing-lessons.md
+@prompts/AUTORUN.md @prompts/07-metrics-events.md
 
-두 문서를 읽고 M6 브리핑·교훈을 실행해줘.
+두 문서를 읽고 M7 이력 타임라인·지표를 실행해줘.
 
 AUTORUN.md가 실행 규약이다. 특히 §3 "반드시 질문해야 하는 상황"을 지켜줘 —
 사양이 갈리거나, 실측이 문서를 뒤집거나, DoD가 안 닫히거나, 스코프가 애매하면
 추측하지 말고 AskUserQuestion으로 물어봐. 반대로 §4에 있는 것들(문서에 답이
 있는 것, 관례적 판단)은 묻지 말고 그냥 진행해.
 
-⚠️ 06-briefing-lessons.md 상단의 ✂️ 컷라인은 **적용하지 않는다.** 데드라인이
-없으므로 교훈 메모리와 브리핑 스케줄러를 전부 구현한다 (AUTORUN §1).
+⚠️ 07-metrics-events.md 상단의 ✂️ 컷라인은 **적용하지 않는다.** 데드라인이
+없으므로 지표 4종 + 등급별 정확도를 전부 구현한다 (AUTORUN §1).
 
-M0~M5는 끝났다. 마이그레이션 head는 0006, pytest 316 passed다.
-M5가 남겨 둔 접점 (다시 만들지 마라):
-- 브리핑 시각 계산은 dnd.next_briefing_at 을 써라. defer 기본 만기(D15)와
-  알림 보류가 이미 이 함수를 쓴다 — 세 곳이 어긋나면 담당자 교체 시 깨진다.
-- briefing.ready 발행은 sse_manager.queue_briefing_ready 가 이미 있다(호출부만 없다).
-- 보류 알림 flush 대상은 notifications.deliver_after <= now() 다.
-- 잡 등록은 core/scheduler.py 에 더한다(만료 스위퍼·좀비 회수가 이미 있다).
-- 교훈 후보 자리는 grep -rn "TODO(M6)" app/ 로 3곳이 나온다.
+M0~M6은 끝났다. 마이그레이션 head는 0007, pytest 356 passed다.
+M6이 남겨 둔 접점 (다시 만들지 마라):
+- auto_answer_rate 는 metrics_service 에 이미 있다. §13 은 그것을 그대로 쓴다.
+  grade_counts() 가 {green, yellow, red} 를 준다.
+- 집계 원천은 answers 행이 아니라 question.graded 이벤트다 (룰 4).
+  M6 가 answers 로 짰다가 리뷰에서 되돌렸으니 다시 되돌리지 마라.
+- grade_accuracy[] 는 accuracy_service.for_grade 를 등급마다 부른다.
+- lesson.candidate/approved/deleted 이벤트는 이미 기록된다(시계열 학습 곡선용).
 
-⚠️ 브리핑 중복 발송은 락이 아니라 제약으로 막는다 — briefing_runs 의
-   UNIQUE(project_id, run_date) + ON CONFLICT DO NOTHING → rowcount==1 일 때만 발송.
-⚠️ 🟢 카드는 큐에는 있고 브리핑에는 없다. correct 2건 후에만 recommend_approve[]에
-   올라온다 — 큐와 브리핑의 필터가 다르다는 것이 이 마일스톤의 핵심이다.
-⚠️ SSE 발행은 sse_manager.enqueue(아웃박스)를 쓴다. 커밋 후 직접 publish 하지 마라.
+⚠️ 작업 1(이벤트 기록 감사)이 이 마일스톤에서 제일 중요하다. 이벤트가 비면
+   지표를 나중에 되살릴 수 없다 — 과거 데이터는 소급 생성되지 않는다.
+   실제 구멍 하나를 M6 이 이미 찾아 뒀다: reason='failed' 카드를 edit 하면
+   grade=red 인 새 Answer 행이 생기는데 question.graded 이벤트가 없다.
+⚠️ requestion_instant_rate 의 분모는 reused + reuse_missed 다 (D26).
+   reuse_missed 를 빼면 재사용 1건만 일어나도 100% 가 되어 실패를 은폐한다.
+⚠️ grade_accuracy 는 표본 30 미만이면 값 대신 sufficient:false + message 다.
+   데모 규모에서 🟡·🔴 이 "표본 부족"으로 뜨는 건 버그가 아니라 D25 의 의도다.
 
-M6 DoD를 하나씩 확인하고, 통과하면 커밋하고, START-HERE.md 세션표를 갱신한 뒤
-보고하고 멈춰줘. 다음은 M7 지표다(새 세션).
+M7 DoD를 하나씩 확인하고, 통과하면 커밋하고, START-HERE.md 세션표를 갱신한 뒤
+보고하고 멈춰줘. 다음은 M8 외부 연동이다(새 세션).
 ```
 
 > 이후 마일스톤도 같은 형태다 — `@prompts/AUTORUN.md @prompts/01-auth-projects.md` 처럼

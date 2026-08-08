@@ -693,6 +693,35 @@
 
 교훈 객체: `{ id, content, status, needs_recheck, last_used_at, source_answer_id, created_at }`
 
+### 10.1 목록 응답
+
+`§1.2` 페이지네이션 봉투에 `cleanup_suggestions`가 **하나 더 붙는다.**
+
+```json
+{
+  "items": [ { "id": "l-3", "content": "일본 리전은 현지법이 글로벌 정책보다 우선한다",
+               "status": "approved", "needs_recheck": false,
+               "last_used_at": "2026-08-06T01:20:11Z", "source_answer_id": "a-9",
+               "created_at": "2026-07-30T04:00:00Z" } ],
+  "total": 32, "limit": 20, "offset": 0,
+  "cleanup_suggestions": ["l-11", "l-27"]
+}
+```
+
+| 필드 | 계약 |
+| --- | --- |
+| `status` (쿼리) | `candidate` \| `approved` **만** 허용한다. 그 밖의 값(`deleted` 포함)은 400 `VALIDATION_ERROR`다 — 200 + 빈 목록으로 내려보내면 프론트가 오타와 "해당 교훈 없음"을 구분할 수 없다 |
+| `items[]` | 위 교훈 객체. 삭제된 교훈은 어떤 필터로도 나오지 않는다 |
+| `cleanup_suggestions` | **`id` 배열이다** (객체가 아니다). 초과가 아닐 때도 `[]`로 **항상 존재**하므로 프론트는 키 유무를 분기하지 않는다 |
+
+**`cleanup_suggestions` 의 계약**
+
+- **객체가 아니라 id 배열**인 이유: 같은 교훈이 한 응답에 두 번 실리지 않게 하기 위함이다. 프론트는 이 id로 `items` 안 해당 행에 "정리 제안" 배지를 붙인다.
+- **정렬**: 오래되고 안 쓰인 순 — `last_used_at`이 없는 것(승인 후 한 번도 주입되지 않았다) 먼저, 그다음 마지막 사용이 오래된 것, 동률이면 먼저 만들어진 것.
+- **개수**: 승인 교훈이 `settings.max_lessons`(기본 30)를 넘을 때만, **초과분만큼**이다. 이하면 `[]`.
+- **계산 범위는 승인 교훈 전체다.** 페이지 단위가 아니므로 `limit`이 작으면 **제안된 id가 현재 `items`에 없을 수 있다** — 배지를 붙일 행이 이 페이지에 없다는 뜻이지 잘못된 id가 아니다. 페이지마다 다시 계산하면 "30개를 넘었다"는 판정 자체가 페이지에 따라 달라진다.
+- ⛔ **자동 삭제는 없다** (`02` 룰 7). 제안일 뿐이고 지우는 것은 담당자의 `DELETE /lessons/{id}`다.
+
 ---
 
 ## 11. 알림함 `/notifications`

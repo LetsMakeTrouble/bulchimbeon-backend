@@ -49,6 +49,15 @@ EVENT_OFFICIAL_QA_ARCHIVED = "official_qa.archived"
 # 문서 스코프다 — 한 번의 연쇄가 여러 질문에 걸치므로 질문에 붙일 수 없다.
 EVENT_ANSWERS_REVIEW_CASCADE = "answers.review_cascade"  # payload: count
 
+# M6 교훈 메모리 (`04 §5`).
+#
+# ⚠️ 카드·공식 Q&A 와 같은 규약으로 **질문 스코프**다 — 교훈은 그 질문의 수정 확정에서
+#    태어나므로 `05 §13` 타임라인에서 카드 이벤트 바로 옆에 놓여야 이력이 읽힌다.
+#    교훈 식별자는 payload 로 싣는다.
+EVENT_LESSON_CANDIDATE = "lesson.candidate"
+EVENT_LESSON_APPROVED = "lesson.approved"
+EVENT_LESSON_DELETED = "lesson.deleted"
+
 ENTITY_QUESTION = "question"
 ENTITY_ANSWER = "answer"
 ENTITY_DOCUMENT = "document"

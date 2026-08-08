@@ -112,3 +112,16 @@ class TextOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str
+
+
+class LessonOut(BaseModel):
+    """교훈 추출 — 원답 vs 수정답의 차이에서 뽑은 **재사용 가능한 한 줄 원칙** (`06 §3`).
+
+    필드가 하나뿐인 이유는 `06 §3` 의 출력 예시가 `{"lesson": "..."}` 하나이기 때문이다.
+    설명·근거·확신도를 덧붙이면 `content_hash` 대조(D8)가 흔들린다 — 같은 원칙이라도
+    부가 문장이 매번 달라지면 삭제한 교훈이 다른 해시로 되살아난다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    lesson: str

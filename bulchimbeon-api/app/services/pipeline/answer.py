@@ -55,6 +55,7 @@ from app.models.review_card import CARD_REASON_FAILED
 from app.models.user import User
 from app.services import (
     event_service,
+    lesson_service,
     notification_service,
     project_service,
     review_card_service,
@@ -385,7 +386,11 @@ async def _pipeline(db: AsyncSession, question_id: UUID) -> _Outcome | None:
                 guidelines=prompts.guidelines_block(
                     await project_service.get_guideline_content(db, project.id)
                 ),
-                lessons=prompts.lessons_block(),
+                # 승인 교훈만 주입되고 주입한 것들의 `last_used_at` 이 갱신된다 (룰 7, `06 §3`).
+                # `candidate` 는 여기 절대 들어오지 않는다 — 담당자 승인이 유일한 승격 경로다.
+                lessons=prompts.lessons_block(
+                    await lesson_service.load_for_prompt(db, project=project)
+                ),
             ),
             user=prompts.answer_user_prompt(
                 evidence=evidence, aliases=aliases, question_en=question.content_en

@@ -18,6 +18,7 @@
 | `schema_fail` | ④ 가 3회 모두 스키마 위반 | 6 |
 | `same_question=no` | ② 2차 게이트가 `no` (기본 `yes`) | 4 |
 | `urgent` | ① 이 `suggest_urgent=true` | D10 |
+| `lesson=<한 줄>` | 교훈 추출이 그 문장을 그대로 돌려준다 | 8 |
 
 ⑤ 의 판정은 **문장 텍스트**로 결정된다(`Unsupported` 로 시작하는 문장이 unsupported).
 ⑤ 프롬프트에는 문장 원문이 실리므로 마커를 다시 주입하지 않아도 결정적이다.
@@ -50,6 +51,14 @@ SENTENCE_BLOCK_PREFIX = "[SENTENCE "
 # ④ 가 만드는 문장의 접두사. ⑤ 가 이것만 보고 supported 를 결정한다.
 SUPPORTED_PREFIX = "Supported"
 UNSUPPORTED_PREFIX = "Unsupported"
+
+# 교훈 추출 user 프롬프트의 **수정답** 머리말. `SENTENCE_BLOCK_PREFIX` 와 같은 이유로
+# prompts.py 와 이 파일이 공유한다 — 기본 교훈이 수정답에서 파생되기 때문이다.
+LESSON_CORRECTED_PREFIX = "[CORRECTED ANSWER] "
+
+# 마커 없이 뽑힌 교훈의 접두사. 같은 수정답이면 같은 교훈이 나와야 `content_hash` 대조(D8)로
+# 삭제 교훈 재생성 차단(`06 §5` 테스트 8)을 검증할 수 있다.
+LESSON_TEXT_PREFIX = "Lesson from correction: "
 
 
 def deterministic_embedding(text: str, dim: int = EMBEDDING_DIM_FIXED) -> list[float]:
@@ -88,6 +97,11 @@ class FakeLLMProvider:
         self.translate_calls: list[tuple[str, str, str]] = []
         # 테스트가 특정 텍스트에서 임베딩을 실패시켜 ingest failed 경로를 밟게 한다.
         self.embed_failure: str | None = None
+        # 같은 목적의 구조화 호출 쪽 스위치 — **스키마 이름**을 담으면 그 단계만 죽는다.
+        # 교훈 추출(`LessonOut`)만 실패시켜 담당자 확정이 롤백되지 않는지 보는 데 쓴다 (룰 9).
+        # 마커(`schema_fail`)와 달리 **재시도 소진이 아닌 프로바이더 장애**(타임아웃·네트워크)를
+        # 흉내 내므로 `LLMSchemaError` 가 아니라 `LLMProviderError` 다.
+        self.complete_json_failure: str | None = None
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         self.embed_calls.append(list(texts))
@@ -109,6 +123,9 @@ class FakeLLMProvider:
         테스트 6 이 검증하는 것이 바로 이 소진 경로다.
         """
         self.complete_json_calls.append((schema.__name__, system, user, model))
+
+        if self.complete_json_failure == schema.__name__:
+            raise LLMProviderError(f"fake complete_json failure: {schema.__name__}")
 
         last_error: Exception | None = None
         for _ in range(1 + MAX_SCHEMA_RETRIES):
@@ -156,7 +173,21 @@ class FakeLLMProvider:
         if name == "TextOut":
             return {"text": f"[translated] {user.strip()}"}
 
+        if name == "LessonOut":
+            return self._lesson_payload(markers, user)
+
         raise LLMProviderError(f"FakeLLMProvider 가 모르는 스키마다: {name}")
+
+    def _lesson_payload(self, markers: dict[str, str], user: str) -> Any:
+        """교훈 추출 (`06 §3`) — **수정답이 같으면 항상 같은 교훈**이다.
+
+        이 결정성이 `06 §5` 테스트 8(삭제 교훈 재생성 차단)의 전제다. 같은 수정을 다시
+        확정했을 때 다른 문장이 나오면 해시가 달라져 D8 이 검증 불가능해진다.
+        """
+        if "lesson" in markers:
+            return {"lesson": markers["lesson"]}
+        corrected = user.rpartition(LESSON_CORRECTED_PREFIX)[2].strip()
+        return {"lesson": f"{LESSON_TEXT_PREFIX}{corrected}"}
 
     def _sentences_payload(self, markers: dict[str, str], user: str) -> Any:
         if "schema_fail" in markers:

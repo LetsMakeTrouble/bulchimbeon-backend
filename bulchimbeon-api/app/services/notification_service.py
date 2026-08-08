@@ -22,7 +22,7 @@ SSE 발행은 커밋 직후 `sse_manager` 의 아웃박스가 처리한다.
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -37,6 +37,7 @@ from app.models.notification import (
     NOTIFICATION_ANSWER_KEPT,
     NOTIFICATION_ANSWER_REJECTED,
     NOTIFICATION_ANSWER_VERIFIED,
+    NOTIFICATION_BRIEFING_READY,
     NOTIFICATION_CARD_CREATED,
     NOTIFICATION_DOC_REVIEW_NEEDED,
     NOTIFICATION_FEEDBACK_DIFFERENT,
@@ -62,7 +63,6 @@ _MAX_LIMIT = 100
 _PREVIEW_LENGTH = 60
 
 _FALLBACK_LANGUAGE = "ko"
-_FALLBACK_TIMEZONE = "UTC"
 
 
 def _localized(table: dict[str, str], language: str) -> str:
@@ -151,6 +151,14 @@ _BODY_FEEDBACK_DIFFERENT = {
     "ko": "‘{quote}’ — {note}",
     "en": "“{quote}” — {note}",
 }
+_TITLE_BRIEFING_READY = {"ko": "오늘의 브리핑이 준비됐습니다", "en": "Your briefing is ready"}
+# 건수를 문안에 넣지 않는다 — 브리핑 본문(`05 §8`)이 카드 배열과 `stats_snapshot` 을 이미 담고
+# 있고, 프론트는 이 알림을 받으면 그 GET 을 다시 부른다 (`05 §12.2`). 여기에 숫자를 복사하면
+# 열어 보는 시점에는 이미 틀린 수가 된다.
+_BODY_BRIEFING_READY = {
+    "ko": "확인이 필요한 항목을 모아 두었습니다.",
+    "en": "We have gathered the items that need your review.",
+}
 
 
 # --------------------------------------------------------------------------------------
@@ -207,11 +215,14 @@ async def answerer_deliver_after(
     타임존·브리핑 시각의 단일 원천은 **현재 담당자의 `users.timezone`** 이다 (`04 §3`) —
     `settings.briefing_timezone` 은 존재하지 않으므로 담당자가 교체되면 판정도 따라 옮겨간다.
 
-    ⚠️ 브리핑 시각 계산은 `dnd.next_briefing_at` 하나만 쓴다. `defer` 기본 만기(D15)와 M6
-    브리핑 스케줄러가 같은 함수를 공유해야 담당자 교체 시 세 곳이 어긋나지 않는다.
+    ⚠️ 보류 만기 계산은 `dnd.next_briefing_at` 하나만 쓴다 — `defer` 기본 만기(D15)와 같은
+    함수라야 담당자 교체 시 두 곳이 어긋나지 않는다. **M6 브리핑 발송 잡은 여기 끼지 않는다**:
+    그 함수는 항상 미래를 돌려주므로 "브리핑 시각에 도달했는가"에 답할 수 없어
+    `briefing_dispatch_service` 는 현지 시각을 직접 본다. 두 경로가 공유하는 것은 함수가
+    아니라 `dnd.zone()` 과 `settings.briefing_hour` 를 접는 방식이다.
     """
     answerer = await db.get(User, project.answerer_id)
-    timezone_name = answerer.timezone if answerer is not None else _FALLBACK_TIMEZONE
+    timezone_name = answerer.timezone if answerer is not None else dnd.FALLBACK_TIMEZONE
     now = datetime.now(UTC)
 
     def setting(key: str) -> Any:
@@ -399,6 +410,32 @@ async def notify_card_created(
     return notification
 
 
+async def notify_briefing_ready(
+    db: AsyncSession, *, project: Project, run_date: date
+) -> Notification:
+    """`briefing.ready` (담당자) — 브리핑 시각 배치 (`04 §4`, `06 §4`).
+
+    발화 지점은 브리핑 스케줄러 하나뿐이다 (`briefing_dispatch_service`).
+
+    ⚠️ **즉시 발송이다** — `answerer_deliver_after` 를 태우지 않는다. 이 알림 자체가 브리핑
+    시각의 발화이므로 보류 규칙(룰 6)을 적용하면 자기 자신을 다음 브리핑까지 미룬다.
+    DND 도 보지 않는다: `briefing_hour` 가 DND 안에 들어가도록 설정한 담당자는 그 시각에
+    깨어 있겠다고 스스로 정한 것이다.
+    """
+    language = await _language(db, project.answerer_id)
+    return await create(
+        db,
+        user_id=project.answerer_id,
+        project_id=project.id,
+        type=NOTIFICATION_BRIEFING_READY,
+        title=_localized(_TITLE_BRIEFING_READY, language),
+        body=_localized(_BODY_BRIEFING_READY, language),
+        # `run_date` 는 담당자 타임존 기준 날짜이며 SSE `briefing.ready` 의 `date`(`05 §12.3`)와
+        # 같은 값이다 — 두 경로가 같은 하루를 가리켜야 딥링크가 어긋나지 않는다.
+        payload={"project_id": str(project.id), "date": run_date.isoformat()},
+    )
+
+
 async def notify_doc_review_needed(
     db: AsyncSession,
     *,
@@ -479,6 +516,62 @@ async def notify_feedback_different(
             db, project=project, immediate=question.urgency == "urgent"
         ),
     )
+
+
+# --------------------------------------------------------------------------------------
+# 보류분 flush (`06 §4` — 브리핑 발송 시)
+# --------------------------------------------------------------------------------------
+async def flush_pending(
+    db: AsyncSession, *, user_id: UUID, project_id: UUID, now: datetime
+) -> list[Notification]:
+    """브리핑 시각이 되어 보류가 풀린 담당자 알림을 발행한다 — `create()` 계약의 나머지 반쪽이다.
+
+    `create()` 는 보류 건에 SSE 를 내지 않고 "발행 시점은 브리핑 flush 다"라고 미뤄 뒀다.
+    여기가 그 시점이며 두 가지를 한다.
+
+    1. **`deliver_after` 를 NULL 로 내린다** = 발행 완료 표시. 목록·카운트(`_deliverable`)에서
+       무조건 보이게 만드는 동시에, 다음 날 flush 가 **같은 건을 다시 집어 SSE 를 또 내는 것**을
+       막는다 (`deliver_after <= now` 는 한 번 참이 되면 영원히 참이다). 스키마에 "발행됨"
+       플래그를 새로 만들지 않는 이유이기도 하다 — 룰 6 은 보류를 `deliver_after` **한 컬럼**으로
+       표현하라고 못박았고, NULL 은 그 어휘 안에서 "미룰 것이 없다"를 뜻한다.
+    2. **SSE 는 `card.created` 를 빼고 낸다.** 브리핑 시각에 밀린 카드 알림이 N 건이면
+       `notification.created` 도 N 번 나가는데, 프론트는 이벤트를 갱신 신호로만 쓰고 목록을
+       통째로 다시 읽으므로(`05 §12.2`) 같은 재조회를 N 번 시키는 낭비다. `06 §4` 가 "`card.
+       created` 묶음은 `briefing.ready` 하나로 요약 가능"이라고 한 것이 이 뜻이며, 호출자가
+       바로 뒤에 내는 `briefing.ready` 한 건이 그 묶음을 대표한다. 반대로 DND 때문에 밀린
+       **즉시 알림**(`doc.review_needed`·`feedback.different`·`answer.corrected`)은 원래
+       한 건씩 알리기로 한 것들이라 각자 SSE 를 받는다.
+
+    ⚠️ 조건에 `user_id` 등호를 먼저 두어 `(user_id, deliver_after)` 인덱스를 타게 한다
+    (`04 §7`). 프로젝트만으로 좁히면 그 인덱스를 못 쓴다 — 담당자별 알림 테이블이기 때문이다.
+    """
+    rows = list(
+        (
+            await db.scalars(
+                select(Notification)
+                .where(
+                    Notification.user_id == user_id,
+                    Notification.deliver_after.is_not(None),
+                    Notification.deliver_after <= now,
+                    # 프로젝트마다 브리핑 시각이 다르다 — 남의 프로젝트 보류분을 함께 풀지 않는다.
+                    Notification.project_id == project_id,
+                )
+                .order_by(Notification.created_at.asc())
+            )
+        ).all()
+    )
+
+    for notification in rows:
+        notification.deliver_after = None
+        if notification.type != NOTIFICATION_CARD_CREATED:
+            sse_manager.queue_notification_created(
+                db, user_id=user_id, notification_id=notification.id, type=notification.type
+            )
+
+    if rows:
+        await db.flush()
+        logger.info("브리핑 보류 알림 flush: %s건 (user=%s)", len(rows), user_id)
+    return rows
 
 
 # --------------------------------------------------------------------------------------

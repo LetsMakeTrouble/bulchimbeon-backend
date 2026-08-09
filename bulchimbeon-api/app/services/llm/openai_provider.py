@@ -34,6 +34,50 @@ logger = logging.getLogger(__name__)
 # 추론 토큰도 이 한도에 포함되므로 여유 있게 잡는다(부족하면 `incomplete` → schema_failed 가 된다).
 MAX_OUTPUT_TOKENS = 8192
 
+# --------------------------------------------------------------------------------------
+# 토큰 사용량 관측 (`03 §4.2`)
+#
+# ⚠️ 이것은 **단가 산정용 관측**이지 회계가 아니다. 일일 상한(`daily_llm_call_limit`)은
+# 토큰이 아니라 호출 **수**로 세며(`pipeline/quota.py`) 여기 값과 무관하다 — 둘을 엮으면
+# 상한의 성격이 "폭주 방어"에서 "과금 통제"로 바뀌어 룰 3 의 임계값 정의와 어긋난다.
+#
+# 프로세스 메모리이고 재시작하면 사라진다. 누적을 보려면 로그(`llm usage …`)를 쓴다.
+# `reasoning_tokens` 는 `output_tokens` 에 **포함된** 값이다 — 더하면 이중 계상이다.
+# --------------------------------------------------------------------------------------
+_usage_log: list[dict[str, Any]] = []
+
+
+def usage_log() -> list[dict[str, Any]]:
+    """기록된 호출별 사용량. 측정 스크립트(`scripts/measure_tokens.py`)의 진입점이다."""
+    return list(_usage_log)
+
+
+def reset_usage_log() -> None:
+    """측정 구간을 나누기 위한 초기화. 운영 경로에서 부르지 않는다."""
+    _usage_log.clear()
+
+
+def _record_usage(model: str, response: Any) -> None:
+    """`responses.parse` 응답의 usage 를 기록한다. usage 가 없으면 조용히 넘어간다."""
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+    details = getattr(usage, "output_tokens_details", None)
+    record = {
+        "model": model,
+        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+        "reasoning_tokens": (getattr(details, "reasoning_tokens", 0) or 0) if details else 0,
+    }
+    _usage_log.append(record)
+    logger.info(
+        "llm usage model=%s in=%s out=%s reasoning=%s",
+        record["model"],
+        record["input_tokens"],
+        record["output_tokens"],
+        record["reasoning_tokens"],
+    )
+
 
 class OpenAIProvider:
     def __init__(self) -> None:
@@ -64,6 +108,18 @@ class OpenAIProvider:
             )
         except Exception as exc:  # SDK 예외를 호출자에게 그대로 흘리지 않는다.
             raise LLMProviderError(f"embedding 호출 실패: {exc}") from exc
+
+        # 임베딩 usage 는 `prompt_tokens` 한 칸뿐이다(출력 토큰 개념이 없다).
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            _usage_log.append(
+                {
+                    "model": settings.embedding_model,
+                    "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                    "output_tokens": 0,
+                    "reasoning_tokens": 0,
+                }
+            )
 
         # 응답 순서 보장은 index 필드로만 확실해진다.
         ordered = sorted(response.data, key=lambda item: item.index)
@@ -121,6 +177,9 @@ class OpenAIProvider:
                 continue
             except Exception as exc:
                 raise LLMProviderError(f"responses.parse 호출 실패: {exc}") from exc
+
+            # 스키마 재시도로 버린 응답도 토큰은 이미 썼다 — parsed 검사 **전에** 기록한다.
+            _record_usage(str(params["model"]), response)
 
             parsed = response.output_parsed
             if parsed is None:

@@ -27,7 +27,8 @@ from app.models.question import (
     Question,
 )
 from app.services import answer_service, event_service
-from app.services.pipeline import quota
+from app.services.llm.fake_provider import SENTENCE_BLOCK_PREFIX, FakeLLMProvider
+from app.services.pipeline import prompts, quota
 from tests.helpers import (
     Actor,
     close_dnd_window,
@@ -743,3 +744,54 @@ async def test_answerer_cannot_ask_in_own_project(client: AsyncClient, team: Fix
 
     assert response.status_code == 403
     assert error_code(response) == "FORBIDDEN_ROLE"
+
+
+async def test_verify_receives_the_whole_chunk_not_a_display_snippet(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    team: Fixture,
+    fake_llm_provider: FakeLLMProvider,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """⑤ 는 인용 청크를 **자르지 않고** 받는다 (`06 §2` ⑤).
+
+    `QUOTE_MAX_LENGTH` 는 화면 하이라이트용 스니펫 길이(`05 §6` `citations[].quote`)다.
+    그 값으로 ⑤ 의 근거를 자르면 ④ 는 청크 전문을 보고 문장을 쓰는데 ⑤ 는 앞부분만 보고
+    판정하게 되어, 근거가 청크 **뒤쪽**에 있는 문장이 통째로 "근거 없음"이 된다.
+    배포본 실측에서 🔴 `low_confidence` 10건이 전부 이 경로였고 G 가 예외 없이 0 이었다.
+    """
+    content_ko = "GET 요청에도 멱등키가 적용되나요? [[fake:sentences=1,supported=1]]"
+    tail = "Idempotency keys are ignored on GET and DELETE requests."
+    body = (
+        "Write endpoints accept an optional Idempotency-Key header. "
+        + "The key is stored with the request fingerprint for 24 hours. " * 8
+        + tail
+    )
+    # 잘림이 실제로 일어나는 길이가 아니면 이 테스트는 아무것도 지키지 못한다.
+    assert len(body) > prompts.QUOTE_MAX_LENGTH
+    assert body.index(tail) > prompts.QUOTE_MAX_LENGTH
+
+    await seed_document(
+        db_session,
+        project_id=team.project_id,
+        uploader_id=team.owner.id,
+        chunks=[(body, embedding_with_cosine(content_ko, HIGH_SIMILARITY))],
+    )
+    await db_session.commit()
+
+    seen: list[str] = []
+    original = fake_llm_provider.complete_json
+
+    async def recording(system: str, user: str, schema: Any, *, model: str | None = None) -> Any:
+        seen.append(user)
+        return await original(system, user, schema, model=model)
+
+    monkeypatch.setattr(fake_llm_provider, "complete_json", recording)
+
+    await ask_and_get(client, team.asker, team.project_id, content_ko)
+
+    verify_prompts = [user for user in seen if SENTENCE_BLOCK_PREFIX in user]
+    assert verify_prompts, "⑤ 가 호출되지 않았다 — 이 테스트의 전제가 깨졌다"
+    assert tail in verify_prompts[0], (
+        "인용 청크가 잘려 ⑤ 가 근거 뒷부분을 보지 못했다 — G 가 0 으로 무너지는 경로다"
+    )

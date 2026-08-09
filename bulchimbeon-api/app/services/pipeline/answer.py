@@ -451,11 +451,16 @@ async def _pipeline(db: AsyncSession, question_id: UUID) -> _Outcome | None:
         deadline_skipped_verify = True
         logger.warning("데드라인 초과로 ⑤ 를 건너뛴다: question=%s", question.id)
     elif verifiable:
+        # ⚠️ 인용 청크는 **자르지 않고 전문**을 넘긴다. `QUOTE_MAX_LENGTH` 는 화면
+        # 하이라이트용 스니펫 길이(`05 §6` `citations[].quote`)이지 검증 근거가 아니다.
+        # 그것으로 자르면 ④ 는 청크 전문을 보고 쓴 문장을 ⑤ 는 앞부분만 보고 판정하게 돼,
+        # 근거가 청크 뒤쪽에 있는 문장이 통째로 "근거 없음"이 된다 → G=0 → 멀쩡한 답변이
+        # `low_confidence` 🔴 로 떨어진다 (배포본 실측: 🔴 10건 전부 이 경로였다).
         blocks = [
             (
                 position,
                 sentence.text_en,
-                [aliases[alias].content[: prompts.QUOTE_MAX_LENGTH] for alias in sentence.aliases],
+                [aliases[alias].content for alias in sentence.aliases],
             )
             for position, sentence in enumerate(verifiable, start=1)
         ]

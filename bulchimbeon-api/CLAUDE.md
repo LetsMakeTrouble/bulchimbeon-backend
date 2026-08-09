@@ -57,5 +57,6 @@ uv run python scripts/seed.py --reset              # 데모 시드
 - **GPT-5 계열에 `temperature`·`top_p` 등을 전달하지 않는다**(400). `max_tokens` 대신 **`max_completion_tokens`**.
 - **BackgroundTasks에는 UUID만 전달**한다. ORM 객체·`AsyncSession` 전달 금지 — 태스크 안에서 세션을 새로 연다.
 - 질문 상태에 **`held → answered` 전이가 있다** (카드 approve/edit/answer-option으로 해소될 때. **`reject`는 `held`를 유지**하고 `card_status`만 `resolved`가 된다).
+- **⑤ 근거 검증에 넘기는 인용 청크는 자르지 않는다.** `QUOTE_MAX_LENGTH`(500)는 화면 하이라이트용 스니펫 길이(`05 §6`)다. 그걸로 자르면 ④는 청크 전문을 보고 쓰고 ⑤는 앞부분만 보고 판정해 `G=0`이 된다 (`09 §7.5` 실제 사고).
 - 카드 중복 처리 = 409. 담당자 저장이 항상 우선, 미해소 피드백은 함께 resolved.
 - 퇴근 모드 off / 담당자 교체 / 알림 실패 — 어떤 경우에도 **카드(인박스)는 사라지지 않는다**.

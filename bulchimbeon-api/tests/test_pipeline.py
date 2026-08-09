@@ -48,7 +48,9 @@ from tests.pipeline_helpers import (
 
 # S = 100 이 되는 원시 코사인 (`s_ceil` 0.679 이상).
 HIGH_SIMILARITY = 0.90
-# `similarity_floor`(0.423) 미만 — 청크가 반환돼도 강제 🔴 `no_evidence` 다.
+# `similarity_floor` 미만 — 청크가 반환돼도 강제 🔴 `no_evidence` 다.
+# ⚠️ 숫자를 주석에 박지 마라 — 값은 `DEFAULT_SETTINGS` 에 있고
+#    2026-08-09 에 0.423 → 0.444 로 움직였다.
 BELOW_FLOOR_SIMILARITY = 0.30
 
 

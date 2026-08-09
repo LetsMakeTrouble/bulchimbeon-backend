@@ -197,6 +197,16 @@ LIVE_ONLY_KEYS: frozenset[str] = frozenset({"Q8", "Q10"})
 #    데모 당일 1단계가 "즉답 + 인용" 대신 **재사용**으로 빠져 인용 화면이 사라진다.
 NO_APPROVAL_KEYS: frozenset[str] = frozenset({"Q2", "Q8", "Q10"})
 
+# 🔴 카드 확정에서 제외할 계열 (`seed.resolve_red_cards`).
+#
+# `NO_APPROVAL_KEYS` 에 **Q7 을 더한다** — Q7 은 `09 §7.3` 체크리스트가 "발표 시각에 던져
+# 🔴 유지를 확인하라"고 지정한 질문이라, 공식 Q&A 가 생기면 그때 재사용 경로로 빠져
+# **확인 자체가 불가능해진다.**
+#
+# ⚠️ 키 목록은 전부 이 파일에 둔다 — `seed.py` 에 리터럴로 흩어 두면 보호 대상이 바뀔 때
+#    (2026-08-09 에 실제로 Q1 → Q2 로 한 번 옮겼다) 한쪽만 고쳐진다.
+NO_RED_RESOLVE_KEYS: frozenset[str] = NO_APPROVAL_KEYS | frozenset({"Q7"})
+
 
 @dataclass(frozen=True)
 class HistoryQuestion:
@@ -228,7 +238,7 @@ def _family(key: str, *paraphrases: str) -> tuple[HistoryQuestion, ...]:
 # --------------------------------------------------------------------------------------
 # 이력 질문셋 (`08 §5` 3번 · `09 §2`)
 #
-# 총 58건. 🟢 기대(Q1~Q6·Q11~Q13 계열) 49건 · 🔴 기대(Q7~Q9 계열) 9건.
+# 총 123건. 🟢 기대(Q1~Q6·Q11~Q13 계열) 114건 · 🔴 기대(Q7~Q9 계열) 9건.
 #
 # ⚠️ **문안에 "주제 앵커"를 반드시 넣는다** (배포 세션 실측 2026-08-09).
 #    "HMAC 서명 계산 방법을 알려주세요" 처럼 주제어(웹훅)가 빠지면 유사도가 0.43 대로 떨어져

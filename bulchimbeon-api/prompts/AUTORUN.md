@@ -33,7 +33,9 @@
 > 시나리오 B 가 사라졌다. 나머지 4종은 M-1 값 그대로다.
 
 - LLM 호출은 **`responses.parse`로 고정**. `chat.completions`와 섞지 않는다 (`06 §0`).
-- `reasoning_effort=minimal` 지원됨. **`temperature`는 400** — 절대 전달 금지.
+- **`reasoning_effort`는 `low`다.** M-1 당시 `gpt-5-mini` 에서는 `minimal` 이 지원됐지만,
+  **gpt-5.6 계열은 `minimal` 을 400 으로 거부한다** (2026-08-09 실측, `03 §4.1`).
+  **`temperature`는 400** — 절대 전달 금지.
 - 데드라인 등급별 분리: 🟢/🟡 **25초**, 🔴 **35초**.
 - Postgres는 로컬·CI·배포 전부 **pg18** (`pgvector/pgvector:pg18`).
 - 부분 UNIQUE 단일 UPDATE 스왑은 **행 순서에 따라 통과하기도 한다** — 반드시 2문 절차 (`04 §7`).

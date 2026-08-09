@@ -3,7 +3,7 @@
 ```bash
 set -a; . ./.env; set +a
 uv run python scripts/seed.py --reset                  # 유저·프로젝트·문서 4개 + 인제스트
-uv run python scripts/seed.py --reset --with-history   # + 질문 58건 이력·지표 (발표 전날)
+uv run python scripts/seed.py --reset --with-history   # + 질문 123건 이력·지표 (25~30분)
 ```
 
 > ### 서비스 레이어를 직접 부른다 (HTTP 아님, `09 §2`)
@@ -13,14 +13,17 @@ uv run python scripts/seed.py --reset --with-history   # + 질문 58건 이력·
 
 > ### `--with-history` 는 **실 LLM 을 전제한다**
 > `FakeLLMProvider` 의 임베딩은 해시 기반이라 질문과 청크 사이 코사인이 사실상 0 이다
-> (`06 §5` 한계). `similarity_floor`(0.423)에 전부 걸려 **58건이 모두 강제 🔴 `no_evidence`**
+> (`06 §5` 한계). `similarity_floor`(0.444)에 전부 걸려 **123건이 모두 강제 🔴 `no_evidence`**
 > 가 되므로 등급 분포도 `grade_accuracy` 도 만들어지지 않는다. 그래서 fake 로 돌릴 때는
 > 경고를 찍고 진행한다 — 스크립트 자체를 무료로 점검할 때만 쓴다.
 >
-> 실 LLM 비용 가늠: 58건 × 3~4회 = **약 175~235 호출** (`08 §5`). 여기에 라이브 경로 보호
-> 어서션이 쓰는 **+4회**(Q1·Q8·Q10 번역 3 + 임베딩 1)가 붙는다 — 그 4회는 파이프라인 밖이라
-> `quota.py` 집계에는 잡히지 않는다. `daily_llm_call_limit`(500) 안이지만 여유가 절반
-> 남짓이므로 **발표 당일 재실행은 피하고 전날 채워 둔다.**
+> 실 LLM 비용 가늠: 123건 × 3~4회 ≈ **400 호출** · 25~30분. 여기에 라이브 경로 보호
+> 어서션이 쓰는 **+5회**(Q2·Q7·Q8·Q10 번역 4 + 임베딩 1)가 붙는다 — 그 5회는 파이프라인
+> 밖이라 `quota.py` 집계에 잡히지 않는다.
+> ⛔ **시드도 `daily_llm_call_limit`(500)의 적용을 받는다** — 파이프라인을 인프로세스로
+> 부르므로 카운터가 이 프로세스에 쌓인다. 400/500 = **80% 소진**이라 질문을 150건 근처로
+> 늘리면 뒷부분이 조용히 강제 🔴 `quota_exceeded` 가 된다. 늘릴 때는 한도도 함께 올려라.
+> **발표 당일 재실행은 피하고 전날 채워 둔다.**
 
 > ### 멱등성 (`--reset`, D19)
 > 프로젝트 삭제 API 가 MVP 에 없으므로 **DB 레벨에서** 지운다. 데모 유저는 지우지 않고
@@ -92,6 +95,7 @@ from scripts.demo_questions import (  # noqa: E402
     BY_KEY,
     HISTORY,
     NO_APPROVAL_KEYS,
+    NO_RED_RESOLVE_KEYS,
 )
 
 logger = logging.getLogger("seed")
@@ -157,11 +161,6 @@ APPROVE_TAKE = 2
 # 🔴 카드 확정 비율 — 담당자가 인박스를 절반쯤 처리한 상태를 만든다.
 RED_RESOLVE_EVERY = 2
 RED_RESOLVE_TAKE = 1
-
-# 🔴 확정에서 빼는 계열. `NO_APPROVAL_KEYS`(라이브 시연이 소비하는 질문)에 **Q7 을 더한다** —
-# Q7 은 `09 §5` 체크리스트가 "발표 시각에 던져 🔴 유지를 확인"하라고 지정한 질문이라,
-# 공식 Q&A 가 생기면 그때 재사용 경로로 빠져 확인 자체가 불가능해진다.
-NO_RED_RESOLVE_KEYS: frozenset[str] = NO_APPROVAL_KEYS | frozenset({"Q7"})
 
 
 def log(message: str) -> None:
@@ -368,7 +367,7 @@ class AskedQuestion:
 async def run_history(
     db: AsyncSession, project: Project, askers: list[User]
 ) -> list[AskedQuestion]:
-    """질문 58건을 **실제 파이프라인으로** 돌린다 (`08 §5` 3번).
+    """질문 전체(`HISTORY`, 현재 123건)를 **실제 파이프라인으로** 돌린다 (`08 §5` 3번).
 
     질문자를 번갈아 배정한다 — "맞았다 2건"이 서로 다른 유저여야 승인 추천이 성립하기
     때문이다 (`04 §7` UNIQUE(answer_id, user_id)).
@@ -529,26 +528,40 @@ async def resolve_red_cards(
         if index % RED_RESOLVE_EVERY >= RED_RESOLVE_TAKE:
             continue
 
+        # ⚠️ `project_id` 로 한정하고 순서를 고정한다 — 한 답변에 카드가 여럿일 수 있고,
+        #    정렬 없는 limit(1) 은 물리적 행 배치에 따라 다른 카드를 집는다 (`04 §7`).
         card = await db.scalar(
-            select(ReviewCard).where(ReviewCard.answer_id == item.answer_id).limit(1)
+            select(ReviewCard)
+            .where(
+                ReviewCard.answer_id == item.answer_id,
+                ReviewCard.project_id == project.id,
+            )
+            .order_by(ReviewCard.created_at)
+            .limit(1)
         )
         if card is None or card.status == CARD_STATUS_RESOLVED:
             continue
 
-        # 선택지가 없으면 건너뛴다 — ⑦ 구조화가 실패한 답변이다.
-        answer = await db.get(Answer, item.answer_id)
-        options = (answer.question_struct or {}).get("options") if answer else None
+        # ⚠️ **소비자와 같은 객체를 읽는다.** `review_card_service._selected_option` 은
+        #    `card.question_struct` 를 보므로 여기서 `answer.question_struct` 를 검사하면
+        #    둘이 어긋났을 때 가드가 헛돈다.
+        options = (card.question_struct or {}).get("options")
         if not options:
             continue
 
-        await review_card_service.resolve_card(
-            db,
-            card=card,
-            actor=answerer,
-            action=review_card_service.ACTION_ANSWER_OPTION,
-            option_index=0,
-        )
-        await db.commit()
+        try:
+            await review_card_service.resolve_card(
+                db,
+                card=card,
+                actor=answerer,
+                action=review_card_service.ACTION_ANSWER_OPTION,
+                option_index=0,
+            )
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001 — 한 건 실패로 25분치 시드를 잃지 않는다.
+            await db.rollback()
+            log(f"  · 🔴 카드 확정 건너뜀 (card={card.id}): {type(exc).__name__} {exc}")
+            continue
         resolved += 1
 
     log(f"· 🔴 카드 {resolved}건 확정 (제외 계열: {', '.join(sorted(NO_RED_RESOLVE_KEYS))})")
@@ -571,7 +584,9 @@ async def assert_live_questions_not_reusable(db: AsyncSession, project: Project)
     provider = get_provider()
     threshold = float(project.settings["similar_threshold"])
 
-    guarded = [BY_KEY[key] for key in sorted(NO_APPROVAL_KEYS)]
+    # ⚠️ `NO_APPROVAL_KEYS` 가 아니라 **`NO_RED_RESOLVE_KEYS`** 다 — `resolve_red_cards` 가
+    #    🔴 계열에서도 공식 Q&A 를 만들므로, 승인 제외 목록만 보면 Q7 이 무방비가 된다.
+    guarded = [BY_KEY[key] for key in sorted(NO_RED_RESOLVE_KEYS)]
     # ① 과 같은 프롬프트·스키마로 영어 번역문을 만든다 — 축이 다르면 어서션이 무의미하다.
     english: list[str] = []
     for question in guarded:
@@ -637,7 +652,10 @@ async def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--with-history",
         action="store_true",
-        help="질문 58건을 실제 파이프라인으로 돌려 이력·지표를 채운다 (실 LLM 전제)",
+        help=(
+            f"질문 {len(HISTORY)}건을 실제 파이프라인으로 돌려 이력·지표를 채운다 "
+            f"(실 LLM 전제 · 약 {len(HISTORY) * 3}~{len(HISTORY) * 4} 호출 · 25~30분)"
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -647,7 +665,10 @@ async def main(argv: list[str] | None = None) -> int:
         log("")
         log("⚠️  LLM_PROVIDER 가 openai 가 아니다 — FakeLLM 의 임베딩은 해시 기반이라")
         log("    질문↔청크 코사인이 사실상 0 이고 similarity_floor 에 전부 걸린다.")
-        log("    58건이 **전부 강제 🔴 no_evidence** 로 나온다. 스크립트 점검용으로만 쓸 것.")
+        log(
+            f"    {len(HISTORY)}건이 **전부 강제 🔴 no_evidence** 로 나온다. "
+            "스크립트 점검용으로만 쓸 것."
+        )
         log("")
 
     async with AsyncSessionLocal() as db:

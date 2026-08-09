@@ -99,7 +99,9 @@ def test_history_size_and_green_weighting() -> None:
     그대로 재현되지 않는다. D25 의 30건은 발행된 표본 수이므로 총량으로 흡수하는 수밖에 없다.
     상한을 다시 낮추려면 `eval_questions.py` 로 **발행률을 먼저 재측정**하라.
     """
-    assert 45 <= len(HISTORY) <= 130
+    # ⚠️ **하한도 지킨다.** 실측 발행률 27.6% 기준 30건을 채우려면 ~110건이 필요하므로,
+    #    45 로 줄이면 🟢 발행이 ~12건이 되어 25분짜리 실 LLM 실행 **뒤에** 종료 코드 1 이 난다.
+    assert 100 <= len(HISTORY) <= 130
     green_expected = sum(1 for item in HISTORY if item.family in GREEN_EXPECTED_FAMILIES)
     assert green_expected >= 35
     # 🔴 계열은 등급 분포 확인용으로만 (`09 §2` — "8~10건에 그친다").
@@ -266,8 +268,11 @@ async def _plant_red(
         question_id=question.id,
         grade=GRADE_RED,
         state=ANSWER_STATE_DRAFT,
-        content_ko=None,
-        content_en=None,
+        # ⚠️ 강제 🔴 초안은 `None` 이 아니라 **`""`** 다 (`answer.py` — `" ".join([])`).
+        #    `None` 은 "답변 행 자체가 없다"(D23 `failed`)는 뜻이고, `lesson_service` 가
+        #    그 둘을 갈라 처리하므로 `None` 으로 심으면 **운영이 타는 경로를 안 태운다.**
+        content_ko="",
+        content_en="",
         question_struct={
             "background": "Background.",
             "question": "Which applies?",

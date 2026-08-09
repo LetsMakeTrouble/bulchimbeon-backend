@@ -29,6 +29,7 @@ import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import DEFAULT_SETTINGS
 from app.models.question import (
     ANSWER_SOURCE_GENERATED,
     ANSWER_SOURCE_REUSED,
@@ -51,9 +52,16 @@ from tests.review_helpers import Team, build_team, question_detail
 # — `s_floor` 0.25 · `s_ceil` 0.679 (M-1 게이트 확정값).
 SIM_GREEN = 0.62  # → S = 86 (🟢 하한 80 위)
 EXPECTED_GREEN_S = 86
-SIM_MID = 0.50  # → S = 58 (`similarity_floor` 0.423 위, 🟢 아래)
-# M-1 실측 Q8 top-1 (`08 §3` 대조표). `similarity_floor` 0.423 **바로 아래**다.
-SIM_BELOW_FLOOR = 0.4202
+SIM_MID = 0.50  # → S = 58 (`similarity_floor` 위, 🟢 아래)
+
+# ⚠️ **`DEFAULT_SETTINGS` 에서 파생시킨다 — 숫자를 적지 마라.**
+#    이 상수의 목적은 "`similarity_floor` **바로 아래**"라는 경계를 고정하는 것이다.
+#    리터럴로 두면 임계값이 움직였을 때(2026-08-09 에 0.423 → 0.444 로 실제로 움직였다)
+#    여유가 벌어져 **경계 테스트가 경계를 더 이상 못 잡는데도 초록으로 통과한다.**
+_FLOOR = float(DEFAULT_SETTINGS["similarity_floor"])
+SIM_BELOW_FLOOR = round(_FLOOR - 0.003, 4)
+assert SIM_BELOW_FLOOR < _FLOOR < SIM_MID, "경계 상수가 임계값을 사이에 두지 않는다"
+
 
 # `06 §5` FakeLLM 마커. 조합의 정본은 `fake_provider.py` 독스트링이다.
 MARKER_GREEN = "[[fake:sentences=3,supported=3]]"
@@ -225,7 +233,7 @@ async def test_q8_below_similarity_floor_is_forced_red(
 ) -> None:
     """Q8 의 두 번째 방어선 — top-1 원시 코사인이 `similarity_floor` 미만이면 강제 🔴.
 
-    `08 §3` M-1 대조표의 Q8 실측이 0.4202 로 `similarity_floor`(0.423) **바로 아래**다.
+    `SIM_BELOW_FLOOR` 는 `DEFAULT_SETTINGS["similarity_floor"]` 에서 파생돼 **항상 바로 아래**다.
     ④ 가 무엇을 내든 이 관문에서 먼저 걸린다 — 벡터 검색은 항상 "가장 가까운 무언가"를
     돌려주므로 하한이 없으면 무관한 청크로 답을 만들게 된다 (`06 §2` ③).
     """

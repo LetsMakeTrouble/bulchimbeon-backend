@@ -66,9 +66,9 @@ unavailable" 로만 실패해서 원인을 가리킨다. 같은 이미지를 로
 | `OPENAI_API_KEY` | 실 키 | 전 파이프라인이 죽는다 |
 | `LLM_MODEL_ANSWER` | `gpt-5.6-terra` | 단계별 배정은 `03 §4.1` |
 | `LLM_MODEL_VERIFY` | `gpt-5.6-sol` | ⛔ 뚫리면 환각이 🟢로 발행된다 |
-| `LLM_MODEL_REUSE_GATE` | `gpt-5.6-sol` | ⛔ 뚫리면 틀린 확정답이 재사용된다 |
+| `LLM_MODEL_REUSE_GATE` | `gpt-5.6-terra` | 실측상 sol 과 동일 (`03 §4.1.2`) |
 | `LLM_MODEL_STRUCT` | `gpt-5.6-terra` | |
-| `LLM_MODEL_TRANSLATE` | `gpt-5.6-luna` | ① 질문 번역 전용 |
+| `LLM_MODEL_TRANSLATE` | `gpt-5.6-terra` | ⛔ **luna 로 내리지 마라** — Q8 이 차단선을 넘나든다 (`03 §4.1.3`) |
 | `LLM_MODEL_LESSON` | `gpt-5.6-luna` | |
 | `LLM_MODEL_ANSWER_TRANSLATE` | `gpt-5.6-terra` | ⛔ TRANSLATE와 합치지 마라 (`03 §4.1`) |
 | `LLM_REASONING_EFFORT` | `low` | ⛔ `minimal`은 gpt-5.6에서 **400**이다 |
@@ -289,7 +289,7 @@ Q6·Q13 은 이미 포화에 가까우므로, 더 필요하면 질문을 억지�
 
 ### 7.4 🔴 정확도가 0% 로 뜨던 문제 (사용자 결정 2026-08-09)
 
-이력을 123건으로 늘리자 🔴 표본이 28 → 34 로 30 을 넘겨 `sufficient: true` 가 됐고,
+이력을 123건으로 늘리자 🔴 표본이 30 을 넘겨 `sufficient: true` 가 됐고,
 그 순간 지표 화면에 **"🔴 정확도 0%"** 가 떴다. `08 §4` 는 "🟡·🔴 은 표본 부족 표기가
 정상"이라고 적어 두어 이 상태를 예상하지 못했다.
 
@@ -299,7 +299,7 @@ correct 피드백 경로가 없고 `inject_approvals` 는 🟢·🟡 만 처리�
 실제 운영에서는 담당자가 인박스의 🔴 을 처리하므로 0% 가 나올 수 없다.
 
 조치: `seed.resolve_red_cards()` 가 🔴 카드의 절반을 **선택지로 확정**한다
-(`answer-option`). 결과 **정확도 0.4412 (표본 34)**.
+(`answer-option`). 결과 **정확도 0.4333 (표본 30)** — 최종 실행 기준이며 §7.2 와 같은 값이다.
 
 ⛔ **액션은 `answer-option` 이어야 한다.** `approve` 는 🔴 초안이 본문 없이 남는 경우가
 있어 **빈 답변을 발행**하고, `edit` 은 시드가 답 내용을 **지어내야** 한다. 선택지는

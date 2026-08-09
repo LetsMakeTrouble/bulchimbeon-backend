@@ -10,7 +10,7 @@
 | ORM / 마이그레이션 | SQLAlchemy 2.0 (async) + asyncpg / Alembic | |
 | 스키마 | Pydantic v2 | 요청/응답/LLM 구조화 출력 모두 |
 | DB | PostgreSQL 18 + **pgvector 0.8.6** | 일반 데이터 + 임베딩 통합. **로컬·CI·배포를 pg18로 통일**한다 — M-1에서 Railway 매니지드 Postgres가 18.4를 주는 것이 확인됐고, 배포가 진실이므로 거기에 맞춘다 (`06 §2` ③) |
-| LLM | OpenAI SDK — 생성·번역 `gpt-5-mini`(`LLM_MODEL_ANSWER`/`LLM_MODEL_TRANSLATE`), **근거 검증 `LLM_MODEL_VERIFY`(별도 env)**, 임베딩 `text-embedding-3-small`(1536차원) | 모델명은 전부 env 설정, 프로바이더 추상화로 교체 가능. 검증 모델을 생성 모델과 **분리 가능하게** 둔 것이 환각 방어 2겹의 핵심("자기평가 순환논리" 반박) |
+| LLM | OpenAI SDK — 단계별 모델 배정 7슬롯 (**§4.1**). 검증만 `gpt-5.6-sol`, 나머지는 `terra`/`luna`. **근거 검증 `LLM_MODEL_VERIFY`(별도 env)**, 임베딩 `text-embedding-3-small`(1536차원) | 모델명은 전부 env 설정, 프로바이더 추상화로 교체 가능. 검증 모델을 생성 모델과 **분리 가능하게** 둔 것이 환각 방어 2겹의 핵심("자기평가 순환논리" 반박) |
 | 실시간 | **FastAPI 네이티브 SSE** — `fastapi.sse.EventSourceResponse` | **`sse-starlette` 의존성 제거.** 네이티브가 `X-Accel-Buffering: no` 헤더와 15초 ping을 자동 처리하므로 별도 래퍼가 필요 없다 (FastAPI 0.135.0+) |
 | 인증 | JWT — **`python-jose[cryptography]>=3.4.0`** + pwdlib[argon2] | access 30분 / refresh 14일. **3.4.0 미만은 CVE-2024-33663 / CVE-2024-33664** — 하한 핀 필수이며 대체 라이브러리 선택지를 두지 않는다 |
 | 파일 파싱 | pypdf(PDF), python-docx(DOCX), MD/TXT 직접 | |
@@ -143,9 +143,9 @@ LLM_PROVIDER=openai                 # openai | fake
 OPENAI_API_KEY=sk-...
 LLM_MODEL_ANSWER=gpt-5.6-terra           # ④ 답변 생성
 LLM_MODEL_VERIFY=gpt-5.6-sol             # ⑤ 근거 검증
-LLM_MODEL_REUSE_GATE=gpt-5.6-sol         # 재사용 판정 "같은 질문인가?"
+LLM_MODEL_REUSE_GATE=gpt-5.6-terra       # 재사용 판정 "같은 질문인가?" (§4.1.2)
 LLM_MODEL_STRUCT=gpt-5.6-terra           # ⑦ 카드 구조화
-LLM_MODEL_TRANSLATE=gpt-5.6-luna         # ① 질문 ko→en
+LLM_MODEL_TRANSLATE=gpt-5.6-terra        # ① 질문 ko→en — ⛔ luna 금지 (§4.1.3)
 LLM_MODEL_LESSON=gpt-5.6-luna            # 교훈 추출 (배치)
 LLM_MODEL_ANSWER_TRANSLATE=gpt-5.6-terra # 담당자 확정문 en→ko (⚠️ 아래 §4.1)
 LLM_REASONING_EFFORT=low            # ⚠️ minimal 은 gpt-5.6 계열에서 400 (§4.1)

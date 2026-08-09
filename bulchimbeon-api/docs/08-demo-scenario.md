@@ -16,7 +16,7 @@
 | `green_threshold` / `yellow_threshold` / `grounding_min` | 80 / 50 / 60 | 리스케일이 스케일 차이를 흡수하므로 모델이 바뀌어도 유지 |
 | `retrieval_top_k` | **6** | 8에서 하향. 확장된 시드가 22청크이므로 top-k가 코퍼스보다 커지는 no-op이 발생하지 않는다 |
 | `s_floor` / `s_ceil` | **0.25 / 0.679** | M-1 게이트 실측 확정 (2026-08-07) |
-| `similarity_floor` | **0.423** | top-1 `sim_raw`가 이 값 미만이면 강제 🔴 `no_evidence`. 실측에서 Q8(0.4202)·Q9(0.3645)를 유사도만으로 차단한다 |
+| `similarity_floor` | **0.444** | top-1 `sim_raw`가 이 값 미만이면 강제 🔴 `no_evidence`. M-1 은 0.423 이었으나 Q8 이 그 분포 안쪽이라 2026-08-09 에 상향했다 (`03 §4.1.3`) |
 | `briefing_hour` / `dnd_start` / `dnd_end` | 9 / 22:00 / 07:00 | ⏰ **담당자 Mike의 `users.timezone`(America/New_York) 기준**으로 판정된다. `settings`에 별도 타임존 키는 없다 |
 
 > ### ⏰ 시연 시각과 DND — 이제 무관하다

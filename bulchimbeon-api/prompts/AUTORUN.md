@@ -26,6 +26,12 @@
  "reuse_threshold": 0.925, "similar_threshold": 0.855}
 ```
 
+> ⚠️ **`similarity_floor` 는 2026-08-09 에 0.423 → 0.444 로 개정됐다** (사용자 결정).
+> 위 JSON 은 **M-1 이 산출한 값의 기록**이므로 그대로 둔다 — 현재 운영값은
+> `app/config.py` 의 `DEFAULT_SETTINGS` 이고 근거는 `docs/03-tech-spec.md §4.1.3` 이다.
+> 사유: 0.423 이 Q8 의 분포 **안쪽**이라, 번역 문장이 조금만 달라져도 강제 🔴 이 풀려
+> 시나리오 B 가 사라졌다. 나머지 4종은 M-1 값 그대로다.
+
 - LLM 호출은 **`responses.parse`로 고정**. `chat.completions`와 섞지 않는다 (`06 §0`).
 - `reasoning_effort=minimal` 지원됨. **`temperature`는 400** — 절대 전달 금지.
 - 데드라인 등급별 분리: 🟢/🟡 **25초**, 🔴 **35초**.

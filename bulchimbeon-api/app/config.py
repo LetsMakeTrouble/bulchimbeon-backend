@@ -50,7 +50,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "grounding_min": 60,  # 문장 3개 이상일 때만 적용
     "s_floor": 0.25,  # 유사도 리스케일 하한 — M-1 손 조정값
     "s_ceil": 0.679,  # 유사도 리스케일 상한 — M-1 관측 상위 10% 지점
-    "similarity_floor": 0.423,  # 미만이면 강제 🔴 no_evidence (원시 코사인 기준)
+    # 미만이면 강제 🔴 no_evidence (원시 코사인 기준).
+    # ⚠️ **M-1 값 0.423 에서 0.444 로 올렸다** (사용자 결정 2026-08-09, 실측 근거 `03 §4.1`).
+    # 0.423 은 Q8 의 분포 **안쪽**이었다 — 번역 문장이 조금만 달라져도 Q8 이 차단선을
+    # 넘어 🟡 이 되고 시나리오 B 가 사라진다. 같은 질문을 5회 번역해 재보니
+    # Q8 이 0.4074~0.4258 로 흔들렸고 네 모델 중 셋이 0.423 을 넘겼다.
+    # 0.444 = (🔴 대역 최댓값 0.4258 + 🟢🟡 대역 최솟값 0.4628) / 2 — M-1 산식과 같은 방식이다.
+    "similarity_floor": 0.444,
     "reuse_threshold": 0.925,  # 재사용 판정 — 리스케일하지 않은 원시 코사인
     "similar_threshold": 0.855,  # 유사 질문 판정 — 원시 코사인
     "draft_expire_hours": 72,  # draft 만료 스위퍼 (D14)
@@ -96,9 +102,16 @@ class Settings(BaseSettings):
     # 뒤에 걸러 줄 단계가 있으면 싼 모델로 충분하고, 없으면 비싼 모델을 쓴다.
     llm_model_answer: str = "gpt-5.6-terra"  # ④ 답변 생성 — 뒤에 ⑤가 걸러 준다
     llm_model_verify: str = "gpt-5.6-sol"  # ⑤ 근거 검증 — 뚫리면 환각이 🟢로 발행된다
-    llm_model_reuse_gate: str = "gpt-5.6-sol"  # 재사용 판정 — 뚫리면 틀린 확정답이 퍼진다
+    # 재사용 판정. ⚠️ **sol 이 아니라 terra 다** — 실측에서 terra 가 sol 과 동일하게 10쌍
+    # 100% 였고 가장 위험한 "틀린 재사용"은 네 모델 모두 0건이었다 (`03 §4.1`).
+    # 앞에 `reuse_threshold`(0.925) 라는 1차 필터가 있어 애매한 쌍이 애초에 도달하지 않는다.
+    llm_model_reuse_gate: str = "gpt-5.6-terra"
     llm_model_struct: str = "gpt-5.6-terra"  # ⑦ 카드 구조화 — 담당자가 읽고 보정한다
-    llm_model_translate: str = "gpt-5.6-luna"  # ① 질문 ko→en — 틀려도 등급만 떨어진다
+    # ① 질문 ko→en. ⚠️ **luna 가 아니라 terra 다** — 번역이 바뀌면 임베딩이 바뀌고
+    # `sim_raw` 가 함께 움직인다. 같은 질문 5회 번역 시 luna 는 **4종**의 서로 다른 문장을
+    # 만들었고(terra 는 1~2종), 그 편차가 Q8 을 차단선 위아래로 흔들었다 (`03 §4.1`).
+    # 데모는 같은 질문에 같은 결과가 나와야 한다 — 여기서는 결정성이 비용보다 비싸다.
+    llm_model_translate: str = "gpt-5.6-terra"
     llm_model_lesson: str = "gpt-5.6-luna"  # 교훈 추출 — 배치, 지연·정확도 여유 있음
     # ⚠️ **담당자 확정문 en→ko 는 번역과 같은 슬롯에 두지 않는다.**
     # 이 번역 결과가 곧 질문자가 읽는 확정 답변이고, 룰 4(확정 ko 원문 재번역 금지)에 따라

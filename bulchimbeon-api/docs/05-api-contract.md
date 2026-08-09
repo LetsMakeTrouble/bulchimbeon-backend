@@ -138,7 +138,7 @@
 | `grounding_min` | int 0~100 | 60 | 문장 3개 이상일 때만 적용 |
 | `s_floor` | float 0~1 | 0.25 | 유사도 리스케일 하한 (M-1 실측 2026-08-07) |
 | `s_ceil` | float 0~1 | 0.679 | 유사도 리스케일 상한 (M-1 실측 2026-08-07) |
-| `similarity_floor` | float 0~1 | 0.423 | top-1 원시 유사도 미달 시 강제 🔴 `no_evidence`. **`s_floor` 파생이 아니라 독립 실측값**이다 (`04 §3`) |
+| `similarity_floor` | float 0~1 | 0.444 | top-1 원시 유사도 미달 시 강제 🔴 `no_evidence`. **`s_floor` 파생이 아니라 독립 실측값**이다 (`04 §3`). 2026-08-09 에 0.423 → 0.444 상향 (`03 §4.1.3`) |
 | `reuse_threshold` | float 0~1 | 0.925 | **원시 코사인** (리스케일 안 함, M-1 실측) |
 | `similar_threshold` | float 0~1 | 0.855 | `similar_official_qa` 첨부 하한 (원시 코사인, M-1 실측) |
 | `draft_expire_hours` | int | 72 | draft 만료 |

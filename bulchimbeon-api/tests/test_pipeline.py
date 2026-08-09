@@ -28,7 +28,14 @@ from app.models.question import (
 )
 from app.services import answer_service, event_service
 from app.services.pipeline import quota
-from tests.helpers import Actor, create_actor, create_project, error_code, join_project
+from tests.helpers import (
+    Actor,
+    close_dnd_window,
+    create_actor,
+    create_project,
+    error_code,
+    join_project,
+)
 from tests.pipeline_helpers import (
     as_uuid,
     ask,
@@ -63,6 +70,9 @@ async def team(client: AsyncClient) -> Fixture:
     project = await create_project(client, owner)
     asker = await create_actor(client, "asker@pipeline.test", name="질문자", timezone="UTC")
     await join_project(client, asker, project["invite_code"])
+    # DND 를 꺼 둔다 — 이유는 `helpers.close_dnd_window` 참조. 이 파일의 DND 테스트들은
+    # 그 뒤에 자기 창을 명시적으로 덮어쓴다.
+    await close_dnd_window(client, owner, project["id"])
     return Fixture(owner, asker, project)
 
 

@@ -23,6 +23,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import DEFAULT_SETTINGS
 from app.models.briefing_run import BriefingRun
 from app.models.notification import (
     NOTIFICATION_BRIEFING_READY,
@@ -253,7 +254,17 @@ async def test_catch_up_briefing_is_suppressed_inside_the_dnd_window(
     team, held = await _team_with_held_notifications(client, db_session, "briefing-dnd.test", 1)
     inside_dnd = datetime(2026, 3, 4, 22, 30, tzinfo=UTC)
 
-    # 기본 DND(`22:00~07:00`) 그대로다 — 룰 3 대로 `projects.settings` 에서 읽는지도 함께 본다.
+    # ⚠️ DND 창을 **명시적으로** 세운다. `build_team` 은 시각 의존 실패를 없애려고 창을 닫아
+    #    두므로(`helpers.close_dnd_window`), 여기서 켜지 않으면 이 테스트의 전제가 사라진다.
+    #    값은 `DEFAULT_SETTINGS` 에서 가져온다 — 룰 3 대로 `projects.settings` 에서 읽는지도
+    #    함께 보는 테스트이므로 숫자를 손으로 적지 않는다.
+    await patch_project_settings(
+        db_session,
+        team.project_id,
+        dnd_start=DEFAULT_SETTINGS["dnd_start"],
+        dnd_end=DEFAULT_SETTINGS["dnd_end"],
+    )
+
     sent = await briefing_dispatch_service.dispatch_due_briefings(db_session, now=inside_dnd)
     await db_session.commit()
 
@@ -278,7 +289,16 @@ async def test_briefing_hour_inside_the_dnd_window_still_fires(
     """
     team, held = await _team_with_held_notifications(client, db_session, "briefing-dnd-own.test", 1)
     # 기본 DND `22:00~07:00` 안으로 브리핑 시각을 옮긴다 (룰 3 — 값은 `projects.settings`).
-    await patch_project_settings(db_session, team.project_id, briefing_hour=23)
+    # ⚠️ DND 창도 함께 세운다. `build_team` 이 창을 닫아 두므로(`helpers.close_dnd_window`)
+    #    이걸 빠뜨리면 `briefing_hour=23` 이 **DND 안이 아니게 되어** 테스트가 통과는 하되
+    #    "DND 안의 briefing_hour" 라는 전제를 잃는다.
+    await patch_project_settings(
+        db_session,
+        team.project_id,
+        briefing_hour=23,
+        dnd_start=DEFAULT_SETTINGS["dnd_start"],
+        dnd_end=DEFAULT_SETTINGS["dnd_end"],
+    )
 
     inside_own_window = datetime(2026, 3, 4, 23, 30, tzinfo=UTC)
     sent = await briefing_dispatch_service.dispatch_due_briefings(db_session, now=inside_own_window)

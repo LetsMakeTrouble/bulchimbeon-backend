@@ -16,7 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.official_qa import OfficialQA
 from app.models.question import Answer, Question
 from app.models.review_card import ReviewCard
-from tests.helpers import API, Actor, create_actor, create_project, join_project
+from tests.helpers import (
+    API,
+    Actor,
+    close_dnd_window,
+    create_actor,
+    create_project,
+    join_project,
+)
 from tests.pipeline_helpers import as_uuid, ask, embedding_with_cosine, seed_document
 
 # S = 100 이 되는 원시 코사인 (`s_ceil` 0.679 이상).
@@ -53,6 +60,8 @@ async def build_team(client: AsyncClient, domain: str) -> Team:
     asker2 = await create_actor(client, f"asker2@{domain}", name="민호", timezone="UTC")
     await join_project(client, asker, project["invite_code"])
     await join_project(client, asker2, project["invite_code"])
+    # DND 를 꺼 둔다 — 이유는 `helpers.close_dnd_window` 참조 (시각 의존 실패 제거).
+    await close_dnd_window(client, owner, project["id"])
     return Team(owner, asker, asker2, project)
 
 

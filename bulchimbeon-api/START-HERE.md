@@ -35,9 +35,16 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 | 8 | M6 브리핑·교훈 — **✅ 완료 2026-08-08** | ~~`@prompts/06-briefing-lessons.md`~~ DoD 8/8, `feat(M6): briefing scheduler and lesson memory` | 컷 없음(전 범위) |
 | 9 | M7 지표 — **✅ 완료 2026-08-08** | ~~`@prompts/07-metrics-events.md`~~ DoD 7/7, `feat(M7): events timeline and metrics` | 컷 없음(4종+정확도) |
 | 10 | M8 외부 연동 — **✅ 완료 2026-08-08** | ~~`@prompts/08-integrations.md`~~ DoD 5/5, `feat(M8): notion and github sync` | 컷 없음 (AUTORUN §1) |
-| 11 | M9 시드 | `@prompts/09-seed-deploy.md 의 시드 부분` | ⛔ 시드는 불가 |
+| 11 | M9 시드 — **✅ 완료 2026-08-09** | ~~`@prompts/09-seed-deploy.md 의 시드 부분`~~ 작업 1·2·3, `feat(M9): seed data, demo question set, regression tests` | ⛔ 시드는 불가 |
 | 12 | **클라우드 배포 + 리허설** | `@prompts/09-seed-deploy.md 의 배포·리허설 부분` | ⛔ 불가 |
 
+> ### ⛔ 배포 세션이 **반드시** 해야 하는 것 — `--with-history` 실행
+> M9 는 시드 **코드**까지만 했다. 질문 58건을 실제 LLM 으로 돌리는
+> `uv run python scripts/seed.py --reset --with-history` 는 **아직 한 번도 실행되지 않았다**
+> (사용자 결정 2026-08-09 — 로컬 DB 에 채워 봐야 배포 후 다시 채워야 하므로 미뤘다).
+> 안 돌리면 `grade_accuracy` 가 전 등급 "표본 부족"으로 떠서 데모 6단계 화면이 빈다 (D25).
+> **배포 DB 에 대고, 발표 전날에** 돌린다.
+>
 > ### ⚠️ 배포 순서를 바꿨다 (**사용자 결정 2026-08-08**)
 > **원래 계획은 배포를 6일차(M5 직후)로 앞당기는 것이었다.** `07 §일정`이 그렇게 배치한 근거는
 > "Railway pgvector extension 권한·마이그레이션·SSE 프록시 같은 **외부 마찰은 코드로 해결되지
@@ -57,113 +64,135 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 
 ## 다음 세션 프롬프트 (그대로 복붙)
 
-> ✅ **M8 외부 연동은 2026-08-08에 완료됐다** (`feat(M8): notion and github sync`).
-> `pytest` **459 passed**, `ruff check`·`ruff format --check` 통과, 마이그레이션 head는 **0010**.
-> `alembic check` = "No new upgrade operations detected".
-> 실 GitHub 공개 레포 e2e 1회 통과 — `probe-github-sync-2026-08-08.txt`.
-> 별도 리뷰 패스(`code-reviewer`) — 지적 14건 중 **차단 2건 포함 12건 수정**, 2건은 사양대로
-> 유지(아래 미해결). 리뷰가 잡은 진짜 결함 둘은 목킹 테스트로는 드러나지 않던 것이었다:
-> Notion 페이지 하나의 실패가 **전체 동기화를 죽이던 것**(`08 §6` 위반), 그리고 인제스트가
-> 실패한 문서가 다음 실행부터 `unchanged`로 보고돼 **검색에서 빠진 채 실패 목록에서도
-> 사라지던 것**. 둘 다 회귀 테스트가 붙었다.
+> ✅ **M9 시드는 2026-08-09에 완료됐다** (`feat(M9): seed data, demo question set, regression tests`).
+> `pytest` **482 passed**, `ruff check`·`ruff format --check` 통과. 마이그레이션 없음(head는 여전히 **0010**).
+> `09` 작업 **1·2·3**(시드 파일·`seed.py`·회귀 테스트+`eval_questions.py`)까지가 이번 범위였고,
+> **4·5번(배포·리허설)이 이번 세션이다.**
 >
-> ### ⚠️ M8이 남긴 것 중 **M9·배포에 영향을 주는 것**
-> - ⭐ **`INTEGRATION_ENCRYPTION_KEY`가 `.env`에 생겼다**(2026-08-08 생성, 랜덤 Fernet 키).
->   `04 §2` `integrations.config`의 토큰은 이 키로 암호화돼 있다. **배포 환경에 같은 값을
->   넣지 않으면** 그 연동은 복호화에 실패해 다시 등록해야 한다(문서·지식은 그대로 남는다).
->   env 값은 정식 Fernet 키가 아니어도 되고(`03 §4` 예시값도 동작), SHA-256으로 파생된다.
-> - **`04 §5` 이벤트 26종이 전부 기록된다.** 마지막 하나였던 `sync.run`을 M8이 채웠고
->   스코프는 `entity_type='integration'`, payload는 `{provider, status, scanned,
->   new_documents, new_versions, unchanged, skipped, repaired, restored, failed[]}`다
->   (열거 자체가 실패하면 `fatal`이 붙는다). **동기화 실패 목록이 사는 유일한 곳**이며
->   `integrations`에는 컬럼을 더하지 않았다(사용자 결정 2026-08-08).
-> - **`documents`에 부분 UNIQUE `(project_id, source_type, source_ref)`가 생겼다**
->   (마이그 0010, 사용자 결정 2026-08-08). 외부 원본 1개 = 문서 1개를 DB가 강제한다 —
->   락이 아니라 제약으로 막는 방식은 `briefing_runs`(결정 1.11)와 같다.
->   업로드 문서는 `source_ref`가 NULL이라 대상 밖이다.
-> - **`document_service`에 바이트 기반 진입점이 생겼다** — `create_version_from_bytes` ·
->   `create_synced_document` · `find_by_source_ref` · `latest_version`. 업로드 경로도 이제
->   `create_version_from_bytes`를 거치므로 버전 번호 잠금·저장 규칙의 구현은 한 곳뿐이다.
-> - **시드는 연동을 만들지 않는다.** `08 §4` 데모 시나리오에 연동이 등장하지 않고, 시드가
->   외부 네트워크에 의존하는 순간 오프라인에서 재현이 깨진다.
+> ### ⛔ 배포 세션이 반드시 해야 하는 것 — **`--with-history`가 아직 한 번도 실행되지 않았다**
+> `scripts/seed.py --with-history`는 코드만 완성됐고 **실 LLM으로 돌린 적이 없다**
+> (사용자 결정 2026-08-09 — 로컬에 채워 봐야 배포 후 다시 채워야 하므로 미뤘다).
+> FakeLLM으로 전 경로를 한 번 돌려 스크립트 자체는 검증했다.
 >
-> ### ⚠️ M7이 고친 것 — `created_at` 기본값이 `now()`가 아니라 `clock_timestamp()`다
-> M7 작업 1(이벤트 감사)이 찾은 건 **빠진 이벤트 타입이 아니라 시각이었다.** `04 §5`의 26종 중
-> `sync.run`(M8 몫)을 뺀 **25종이 전부 제자리에 기록되고 있었지만**, `now()`는
-> `transaction_timestamp()`라 한 요청이 만든 행들의 `created_at`이 **완전히 동일**했다.
-> 파이프라인 한 번이 남기는 이벤트 4건이 동률이라 `05 §13` 타임라인에 **순서가 없었다** —
-> 그런데도 조회는 성공하므로 우연히 맞는 순서로 초록이 지나갔다.
-> `app/models/base.py`의 `ROW_TIMESTAMP` 하나가 정본이고 전 테이블에 적용됐다(마이그 0008).
-> **새 모델은 `CreatedAtMixin`/`TimestampMixin`을 그대로 쓴다** — `server_default=func.now()`를
-> 직접 쓰면 같은 결함이 되살아난다. 이제 `alembic/env.py`가 `compare_server_default=True`라
-> 모델과 DB의 기본값이 어긋나면 `alembic check`가 잡는다.
+> **배포 DB에 대고, 발표 전날에** 아래 순서로 실행한다:
+> ```bash
+> set -a; . ./.env; set +a
+> uv run python scripts/seed.py --reset --with-history   # 58건 · 약 175~235 LLM 호출
+> uv run python scripts/eval_questions.py                # 12건 대조 · 약 36~48 호출
+> ```
+> - `--with-history`는 🟢 발행이 **30건 미만이면 종료 코드 1**로 끝나고 이유를 찍는다.
+>   그때는 `scripts/demo_questions.py`의 🟢 계열 변형을 늘리고 다시 채운다.
+> - **안 돌리면 `grade_accuracy`가 전 등급 "표본 부족"으로 떠서 데모 6단계 화면이 빈다**(D25).
+> - `eval_questions.py`는 측정 후 자기가 만든 질문을 **원상복구**한다(`--keep`으로 남길 수 있다).
+>   Q10은 일부러 건너뛴다 — 확정을 스크립트가 대신하면 일본 환불 Q&A가 미리 생겨
+>   **시나리오 B가 통째로 사라진다.**
 >
-> **M9가 그대로 물려받는 것** (다시 만들지 마라)
-> - **지표·타임라인은 손대지 않는다.** `metrics_service`(비율 4종·시계열)와
->   `accuracy_service.for_grade`(D25)가 정의의 유일한 위치이고, `event_service.list_timeline`이
->   타임라인의 유일한 조회다. 새 이벤트를 기록하기만 하면 시계열·타임라인에 자동으로 실린다.
-> - **활성 버전 교체는 3문 절차**다(`04 §7`, `document_service.activate_version`). 시드도
->   예외 없다 — 단일 UPDATE는 행 순서에 따라 통과하기도 해서 테스트가 초록인 채 운영에서
->   간헐 실패한다.
-> - **시드는 서비스 레이어를 직접 부른다**(`09 §2`). HTTP를 태우지 않으므로 권한 의존성이
->   끼지 않고, 카드 상세를 호출하지 않아 `first_viewed_at`이 오염되지 않는다.
+> ### ⚠️ 로컬 DB의 시드는 **FakeLLM 임베딩**이다
+> 지금 로컬에 있는 `GlobalMart JP Launch` 프로젝트는 무료 점검용으로 fake 프로바이더로 만들었다.
+> 청크 22개는 맞지만 **임베딩이 해시라서 검색이 무의미하다.** 실 프로바이더로 다시 시드해야
+> `eval_questions.py`가 의미를 갖는다.
 >
-> ### ⚠️ M8이 겪은 것 — 테스트 DB는 **기존 테이블에 붙은 새 인덱스를 반영하지 않는다**
-> `Base.metadata.create_all`은 테이블 단위로 `checkfirst`한다. 테이블이 이미 있으면 통째로
-> 건너뛰므로 새 인덱스가 들어가지 않는다 — **새 테이블 추가는 멀쩡히 반영되기 때문에**
-> 눈치채기 어렵다. M8의 `uq_documents_source_ref`를 넣었을 때 제약 검증 테스트가 "제약이
-> 없어서" 실패했다. 기존 테이블에 제약·인덱스를 더했으면 테스트 DB를 한 번 지운다
-> (명령은 `tests/conftest.py` 상단). 마이그레이션 자체는 `test_migrations.py`가 별도
-> 스크래치 DB에서 검증하므로 영향이 없다.
+> ### ⚠️ M9가 **구현을 고친 것 하나** — 청커
+> `08 §2`는 "`##` 섹션 하나가 청크 하나 = 총 22청크"라고 적었지만 실측은 **26청크**였다.
+> 초과분 4개는 파일 맨 위 제목 줄(`# Refund Policy v1` 18자)만 든 빈 청크였다.
+> **사용자 결정 2026-08-08로 청커를 고쳤다** — `utils/chunking._has_prose`가 헤딩 밖에 아무것도
+> 없는 섹션을 버린다. 이제 정확히 22청크이고 문서는 손대지 않았다.
+> ⚠️ **대가가 하나 있다**: 버려진 제목이 `heading_path`에 남는 건 그것이 **조상일 때뿐**이다.
+> 본문 없는 `## Japan` 다음에 형제 `## Korea`가 오면 `Japan`은 통째로 사라진다
+> (`del heading_stack[level - 1:]` 때문). 시드 4문서는 본문 없는 섹션이 H1 넷뿐이고 전부
+> 조상이라 해당 없다. `tests/test_ingest.py::test_heading_only_sibling_disappears_entirely`가
+> 그 경계를 못박아 두었다.
 >
-> 🔧 **M8이 남긴 알려진 미해결 1건** (커밋했고, 급하지 않다):
-> - **실패한 동기화에는 SSE가 없다.** `05 §12.3`의 sync 계열 이벤트가 `sync.completed`
->   하나뿐이라 계약을 지킨 결과다. 담당자는 `sync.failed` 알림과 `last_sync_status`로 안다.
->   ⚠️ **DND 구간(기본 22:00~07:00)에는 그 알림마저 다음 브리핑까지 보류된다**(룰 6) —
->   즉 밤에 실패한 동기화는 `GET /projects/{id}/integrations`의 `last_sync_status`를
->   보기 전까지 아무 신호가 없다. 프론트에 "이 버튼은 실패 시 조용할 수 있다"를 전달할 것.
+> ### ⚠️ M9가 **테스트를 고친 것** — 하루 9시간 동안만 깨지던 CI
+> M8 커밋 상태에서 `test_pipeline` 2건 + `test_sync_github` 1건이 **04:14 UTC에 실패**했다.
+> 원인은 코드가 아니라 테스트다: 담당자 타임존(UTC) 기준 기본 DND `22:00~07:00` 안에서 돌면
+> (a) `low_confidence` 🔴이 🟡로 강등되고(룰 6·D2) (b) 알림이 `deliver_after`로 보류돼
+> 알림함에서 사라진다. **CI는 하루 중 아무 때나 돌므로 9/24 확률로 빨간불이었다.**
+> M8 커밋을 워크트리로 꺼내 같은 3건이 그대로 실패하는 것을 확인했다(내 변경 탓이 아니다).
+> 조치: `tests/helpers.close_dnd_window`를 만들어 `build_team`·`test_pipeline` 픽스처가 DND를
+> 꺼 두고, **DND 동작 자체를 보는 테스트는 자기 창을 명시적으로 세운다.**
+> M5의 `notification_helpers`가 같은 함정을 이미 그렇게 피하고 있었다.
 >
-> 🔧 **M7이 남긴 알려진 미해결 2건** (여전히 유효하다):
-> - `card_handle_30s_rate`는 `payload->>'card_id'`로 조인한다 — JSONB 안이라 인덱스를 타지
->   않는다. 바깥 집합이 "창 안에 열람된 카드"로 좁혀져 있어 데모·운영 규모에서는 문제가 아니지만,
->   프로젝트 하나의 이벤트가 수십만 건이 되면 `events(type, (payload->>'card_id'))`가 필요하다.
-> - `grade_accuracy[]`(D25)만 원천이 `answers` 행이고 나머지 지표는 전부 `events`다. 그래서
->   `reason='failed'` 카드를 담당자가 직접 써서 확정한 답변이 🔴 분모·분자에 함께 잡힌다
->   (자동응답률에서는 제외된다 — `question.graded`가 없으므로). D25의 "해당 등급 전체 발행 수"를
->   문자 그대로 따른 결과이며, 바꾸려면 D25를 먼저 고쳐야 한다.
+> ### M9가 남긴 것 (배포 세션이 그대로 쓴다)
+> - **`scripts/demo_questions.py`가 질문셋의 단일 원천**이다. `seed.py`·`eval_questions.py`·
+>   `tests/test_demo_scenarios.py` 셋이 같은 표를 import 한다. 질문 문안을 세 곳에 복붙하면
+>   한쪽만 고쳐진 채 회귀 테스트가 초록으로 통과한다.
+> - **이력 58건 구성**: 🟢 기대 49건 + 🔴 기대 9건. M-1 실측 S가 높은 계열(Q2 88·Q4 90·
+>   Q6 100·Q11 91·Q13 91)에 변형을 8건씩 몰아 두었다. Q1(65)·Q3(56)·Q5(54)·Q12(66)는
+>   정답 청크를 top-1으로 잡고도 매칭률이 S에 막혀 🟡이 될 수 있어 변형을 적게 뒀다.
+> - **Q8·Q10 원문은 이력에 없고, Q1·Q8·Q10 계열은 승인 주입에서 통째로 제외**된다(`09 §2`).
+>   `assert_live_questions_not_reusable`이 ① 번역문 임베딩으로 최근접 공식 Q&A를 조회해
+>   `similar_threshold` 미만인지 확인하는 **2차 안전망**이고, 뚫렸을 때 실제로 잡는지는
+>   `tests/test_seed.py`가 검증한다.
+> - **시드는 카드 상세를 부르지 않는다** — `resolve_card`만 쓰므로 `first_viewed_at`이
+>   오염되지 않는다(M7 `card_handle_30s_rate` 보호).
+> - **시드는 연동(integrations)을 만들지 않는다** (M8이 정한 대로).
+>
+> 🔧 **M9가 남긴 알려진 미해결 1건 — ⭐ 배포 세션이 가장 먼저 확인할 것**
+> - **M-1 임계값은 운영이 실제로 임베딩하는 것과 *다른 텍스트*로 측정됐다.**
+>   `scripts/probe_calibration.py`는 `embed([c["text"] for c in SEED_CHUNKS])`(919행)로
+>   **헤딩 줄이 빠진 본문만** 임베딩한다. 반면 운영 청커는 헤딩 줄을 청크 본문 앞에 남기므로
+>   (`06 §2` ④ EVIDENCE 포맷의 요구다) `chunks.content`는 `## Sandbox\n...`로 시작하고
+>   인제스트는 그 전체를 임베딩한다. 즉 **`s_floor 0.25`·`s_ceil 0.679`·`similarity_floor
+>   0.423`은 헤딩 없는 텍스트로 뽑은 값**이다.
+>   - 청크 **개수**(22)와 **본문 텍스트**는 이제 일치한다. 어긋난 건 헤딩 줄 유무와
+>     헤딩 라벨 2건(`Partner Sync Notes - July 2026` vs 실제 `— July 2026`)뿐이다.
+>   - 파급: `08 §4` 1단계 대사 **"🟢 87%"**와 `08 §3` M-1 대조표(Q8 0.4202 / Q9 0.3645)가
+>     실측과 어긋날 수 있다. Q8은 차단선과 0.003 차이라 특히 민감하다.
+>   - **조치: 배포 후 `eval_questions.py`를 `--with-history`보다 먼저 돌려라**(12건이라 싸다).
+>     어긋나면 (a) probe의 `SEED_CHUNKS[i]["text"]`에 헤딩 줄을 붙여 재측정하거나
+>     (b) `08 §3` 대조표를 실측으로 갱신한다. **M9에서 고치지 않은 이유**는 M-1 판정 표와의
+>     대조 기준선이 흔들리고, 임계값 재산출은 실 API 재측정이 필요해 시드 범위를 넘기 때문이다.
+>   - 이 결함은 M9가 만든 것이 아니다(M-1/M2 유래). M9의 `eval_questions.py`가 그것을
+>     드러내는 도구다.
 
 ```
 @prompts/AUTORUN.md @prompts/09-seed-deploy.md
 
-두 문서를 읽고 M9 중 **시드 부분(작업 1·2·3)** 을 실행해줘. 배포·리허설(4·5번)은
-다음 세션이다 — 이번 세션에서 배포까지 하지 마라.
+두 문서를 읽고 M9 중 **배포·리허설(작업 4·5번)** 을 실행해줘. 시드(1·2·3)는 끝났다.
 
-AUTORUN.md가 실행 규약이다. 특히 §3 "반드시 질문해야 하는 상황"을 지켜줘 —
-사양이 갈리거나, 실측이 문서를 뒤집거나, DoD가 안 닫히거나, 스코프가 애매하면
-추측하지 말고 AskUserQuestion으로 물어봐. 반대로 §4에 있는 것들(문서에 답이
-있는 것, 관례적 판단)은 묻지 말고 그냥 진행해.
+AUTORUN.md가 실행 규약이다. 특히 §3.3 "외부·비가역·비용" 을 지켜줘 —
+배포, 원격 푸시, 파괴적 마이그레이션은 **실행 전에 확인받는다**.
 
 ⚠️ 09-seed-deploy.md 상단의 "배포는 6일차로 앞당긴다"는 **이미 뒤집혔다** —
-   사용자 결정 2026-08-08 로 개발 완주 후 배포다 (START-HERE 세션표 참조).
+   사용자 결정 2026-08-08 로 개발 완주 후 배포다 (위 세션표 참조).
 
-M0~M8은 끝났다. 마이그레이션 head는 0010, pytest 459 passed다.
-M8이 남겨 둔 접점 (다시 만들지 마라):
-- 04 §5 이벤트 26종이 전부 기록된다. 시드가 서비스 레이어를 그대로 부르면
-  지표·타임라인·시계열이 자동으로 채워진다.
-- document_service 에 바이트 기반 진입점이 있다 (create_version_from_bytes /
-  create_synced_document). 시드가 파일을 넣을 때 새 경로를 만들지 마라.
-- 시드는 연동(integrations)을 만들지 않는다. 08 §4 데모에 연동이 없고, 시드가
-  외부 네트워크에 의존하면 오프라인 재현이 깨진다.
+## 이번 세션의 순서
 
-⚠️ 시드는 카드 상세(GET /review-cards/{id})를 호출하지 않는다 —
-   first_viewed_at 이 오염되면 card_handle_30s_rate 가 무의미해진다.
-⚠️ Q1·Q8·Q10 원문은 이력에 소진하지 않는다 (09 §2의 제외 목록·어서션).
-⚠️ --with-history 는 실 LLM 이 아니라 FakeLLM 으로 돌릴지 먼저 확인해라.
-   실 API 로 45~60건이면 비용이 발생한다 (AUTORUN §3.3).
+1. **배포** (09 작업 4번) — Railway/Render
+   - 시작 커맨드에 `--workers 1` 이 실제로 들어갔는지 대시보드에서 눈으로 확인
+   - `alembic upgrade head` 선행 (head=0010)
+   - `CREATE EXTENSION vector` 권한 → `SELECT extversion FROM pg_extension WHERE extname='vector'`
+     가 0.8.0 이상인지 **배포 DB에서** 확인 (M-1은 로컬만 봤다)
+   - `.env` 체크리스트 출력 — ⭐ `INTEGRATION_ENCRYPTION_KEY` 를 빠뜨리면 M8 연동이
+     복호화에 실패해 다시 등록해야 한다
+   - `STORAGE_DIR` 볼륨이 재시작을 넘어 살아남는지 (업로드가 사라지면 근거가 빈다)
+   - `docs/09-deploy-notes.md` 작성 (URL·시드 실행 방법·롤백)
 
-M9 시드 DoD를 하나씩 확인하고, 통과하면 커밋하고, START-HERE.md 세션표를 갱신한 뒤
-보고하고 멈춰줘. 다음은 클라우드 배포·리허설이다(새 세션).
+2. **기본 시드** — 배포 DB에 대고 `uv run python scripts/seed.py --reset`
+   (문서 4개 + 인제스트만. 이력은 아직 채우지 않는다)
+
+3. ⭐ **실 LLM 대조를 이력보다 먼저** — `uv run python scripts/eval_questions.py`
+   → M-1 `probe_calibration.py` 판정 1 표와 나란히 놓고 임계값이 아직 유효한지 본다.
+   위의 '알려진 미해결 1건'(헤딩 줄) 때문에 **`--with-history`보다 먼저** 돌려라 —
+   12건이라 싸고, 여기서 어긋나면 58건을 채우기 전에 임계값이나 대조표를 먼저 정리해야 한다.
+
+4. **이력 주입** — `uv run python scripts/seed.py --reset --with-history`
+   → 🟢 발행 30건 미만이면 종료 코드 1이다. 그 경우 질문셋을 늘리고 다시.
+
+5. **최종 점검 체크리스트** (09 작업 5번) 전 항목을 결과와 함께 보고.
+   특히 **SSE를 16분 이상 열어 두고** 재연결·`notification.unread_count` 1회 수신 확인.
+   짧게 열어보고 넘기면 발표 중에 조용히 죽는다.
+
+6. **시나리오 A·B 재현 증적**(응답 JSON) 제시 후 커밋.
+
+⚠️ Q1·Q8·Q10 원문은 라이브 시연용이다. 리허설에서 Q8을 확정(edit)해 버리면
+   공식 Q&A가 생겨 **데모 당일 시나리오 B가 재사용으로 빠진다.** 리허설로 확정했다면
+   발표 전에 `--reset --with-history` 로 다시 채워라.
+
+DoD를 하나씩 확인하고, 통과하면 커밋하고, START-HERE.md 세션표를 갱신한 뒤 보고해줘.
 ```
+
 
 > 이후 마일스톤도 같은 형태다 — `@prompts/AUTORUN.md @prompts/01-auth-projects.md` 처럼
 > **규약 + 해당 마일스톤 프롬프트**를 함께 넘긴다. AUTORUN은 매 세션 다시 읽혀야 한다.

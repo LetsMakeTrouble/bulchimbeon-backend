@@ -61,6 +61,27 @@ async def create_project(client: AsyncClient, owner: Actor, name: str = "Acme �
     return response.json()
 
 
+async def close_dnd_window(client: AsyncClient, owner: Actor, project_id: str) -> None:
+    """이 프로젝트의 DND 판정을 **항상 꺼 둔다** (`dnd.in_dnd_window` 은 start == end 면 False).
+
+    ⚠️ **시각 의존 테스트를 없애기 위한 것이다** (M9 실측 2026-08-09 04:14 UTC).
+    기본값 `22:00~07:00` 을 그대로 두면 담당자 타임존(테스트는 UTC) 기준 밤에 도는 실행에서만
+    (a) `low_confidence` 🔴 이 🟡 로 강등되고 (룰 6 · D2) (b) 알림이 `deliver_after` 로 보류돼
+    알림함에서 사라진다 (`05 §11`). 그래서 **하루의 9시간 동안만 깨지는** 테스트가 된다 —
+    실제로 M8 커밋에서 `test_pipeline` 2건과 `test_sync_github` 1건이 그렇게 실패했다.
+    `notification_helpers` 가 M5 에서 같은 함정을 창을 직접 계산해 피한 것과 같은 조치다.
+
+    DND 동작 자체를 보는 테스트는 이 뒤에 자기 창을 명시적으로 덮어쓴다 (부분 갱신이므로
+    나중 값이 이긴다).
+    """
+    response = await client.patch(
+        f"{API}/projects/{project_id}/settings",
+        json={"dnd_start": "00:00", "dnd_end": "00:00"},
+        headers=owner.headers,
+    )
+    assert response.status_code == 200, response.text
+
+
 async def join_project(client: AsyncClient, actor: Actor, invite_code: str) -> dict:
     response = await client.post(
         f"{API}/projects/join",

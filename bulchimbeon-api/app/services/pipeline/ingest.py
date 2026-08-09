@@ -150,8 +150,12 @@ async def _ingest(
 
     drafts = await _parse_and_chunk(resolve_storage_path(version.storage_path), version.mime)
     if not drafts:
+        # ⚠️ 원인이 둘이다. "텍스트가 아예 없다"(스캔 PDF·빈 파일)와 "제목 줄뿐이고 본문이
+        #    없다"(`utils/chunking._has_prose` 가 전부 버린 경우)는 담당자가 취할 조치가
+        #    다르므로 문안에 둘 다 적는다. 이 문자열은 `ingest_error` 로 그대로 내려간다 (`05 §4`).
         raise DocumentParseError(
-            "문서에서 추출된 텍스트가 없습니다. (스캔 PDF 이거나 내용이 비어 있습니다)"
+            "문서에서 근거로 쓸 본문을 찾지 못했습니다. "
+            "(스캔 PDF 이거나, 내용이 비어 있거나, 제목 줄 외에 본문이 없습니다)"
         )
 
     embeddings = await _embed_all([draft.content for draft in drafts])

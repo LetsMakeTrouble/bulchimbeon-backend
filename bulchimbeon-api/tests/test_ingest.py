@@ -80,6 +80,41 @@ def test_empty_pages_produce_no_chunks() -> None:
     assert chunk_pages([ParsedPage(text="   \n\n  ")]) == []
 
 
+def test_heading_only_section_is_not_a_chunk() -> None:
+    """제목 줄만 남은 섹션은 청크가 아니다 (사용자 결정 2026-08-08, M9 실측).
+
+    문서 맨 위 `# 제목` 과 첫 `##` 사이에는 본문이 없다. 그대로 두면 18~32자짜리 "제목 청크"가
+    문서마다 하나씩 생기는데, 이 청크는 **어떤 사실도 진술하지 않으므로** ⑤ 근거 검증에서
+    문장을 뒷받침할 수 없으면서 `retrieval_top_k`(6) 자리 하나를 차지한다.
+    시드 4개 문서에서 22청크가 아니라 26청크가 나오던 원인이 이것이다 (`08 §2`).
+
+    ⚠️ 버려진 제목이 `heading_path` 에 남는 것은 **그것이 조상일 때뿐이다** — 아래
+    `test_heading_only_sibling_disappears_entirely` 가 그 경계를 못박는다.
+    """
+    chunks = chunk_pages([ParsedPage(text="# Refund Policy v1\n\n## Japan\n\njapan body")])
+
+    assert [chunk.content for chunk in chunks] == ["## Japan\n\njapan body"]
+    # 버려진 H1 은 조상이므로 빵부스러기(`05 §6`)에 그대로 남는다.
+    assert chunks[0].heading_path == ["Refund Policy v1", "Japan"]
+
+    # 헤딩만 연달아 나와도 마찬가지다 — 본문이 하나도 없으면 청크가 하나도 없다.
+    assert chunk_pages([ParsedPage(text="# A\n\n## B\n\n### C")]) == []
+
+
+def test_heading_only_sibling_disappears_entirely() -> None:
+    """본문 없는 **형제** 헤딩은 content 에서도 heading_path 에서도 사라진다.
+
+    `_split_by_headings` 가 `del heading_stack[level - 1:]` 로 같은 레벨 이하를 걷어내기
+    때문이다. 조상(`# T`)은 남지만 형제(`## Japan`)는 남지 않는다 — 제목만 있는 섹션을
+    버리기로 한 결정(2026-08-08)의 **대가**이고, 이 테스트가 그 대가를 명시적으로 기록한다.
+    """
+    chunks = chunk_pages([ParsedPage(text="# T\n\n## Japan\n\n## Korea\n\nkorea body")])
+
+    assert len(chunks) == 1
+    assert chunks[0].heading_path == ["T", "Korea"], "형제였던 Japan 은 남지 않는다"
+    assert "Japan" not in chunks[0].content
+
+
 # --- SSE 훅 (`05 §12.3`) ------------------------------------------------------------------
 
 

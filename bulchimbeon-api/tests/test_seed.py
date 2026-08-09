@@ -204,6 +204,22 @@ async def test_live_guard_catches_a_leaked_official_qa(
 # --- 승인 주입 (`08 §5` 3번) ---------------------------------------------------------------
 
 
+def _paraphrase_of(family: str) -> str:
+    """이 계열의 **패러프레이즈** 하나.
+
+    표준 질문 원문은 `seed.CANONICAL_TEXTS` 로 승인·🔴확정 대상에서 빠진다 — 공식 Q&A 가
+    되면 그 질문이 ② 재사용으로 빠져 `eval_questions.py` 가 파이프라인을 검증하지 못하기
+    때문이다. 그래서 승인 경로를 테스트하려면 **실제로 승인되는 쪽**, 즉 이력에 들어가는
+    변형 문장을 심어야 한다.
+    """
+    for item in HISTORY:
+        if item.family == family and item.content_ko not in seed.CANONICAL_TEXTS:
+            return item.content_ko
+    # Q10 처럼 이력에 아예 없는 계열(라이브 전용)은 원문으로 돌아간다. 그런 계열은 어차피
+    # 제외 목록에 걸려 건너뛰는 쪽이므로 이 fallback 이 테스트를 무르게 만들지 않는다.
+    return BY_KEY[family].content_ko
+
+
 async def _plant_answered(
     db: AsyncSession, team: Team, project: Project, family: str
 ) -> seed.AskedQuestion:
@@ -212,11 +228,12 @@ async def _plant_answered(
     여기서 보는 것은 **어떤 카드를 확정하는가**이지 등급이 어떻게 나오는가가 아니다 —
     그건 `test_demo_scenarios.py` 몫이다.
     """
+    content_ko = _paraphrase_of(family)
     question = Question(
         project_id=project.id,
         asker_id=as_uuid(team.asker.id),
-        content_ko=BY_KEY[family].content_ko,
-        content_en=f"[en] {BY_KEY[family].content_ko}",
+        content_ko=content_ko,
+        content_en=f"[en] {content_ko}",
         status=QUESTION_STATUS_ANSWERED,
     )
     db.add(question)
@@ -253,12 +270,16 @@ async def _plant_red(
 
     `answer-option` 은 `red` 카드에만 허용되므로(`review_card_service.ALLOWED_ACTIONS`)
     reason 을 `CARD_REASON_RED` 로 만든다.
+
+    질문 문안은 `_paraphrase_of` 를 쓴다 — 🔴 확정도 공식 Q&A 를 만들므로 표준 원문은
+    `seed.CANONICAL_TEXTS` 로 대상에서 빠진다.
     """
+    content_ko = _paraphrase_of(family)
     question = Question(
         project_id=project.id,
         asker_id=as_uuid(team.asker.id),
-        content_ko=BY_KEY[family].content_ko,
-        content_en=f"[en] {BY_KEY[family].content_ko}",
+        content_ko=content_ko,
+        content_en=f"[en] {content_ko}",
         status=QUESTION_STATUS_HELD,
     )
     db.add(question)

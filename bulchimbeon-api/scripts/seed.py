@@ -18,8 +18,8 @@ uv run python scripts/seed.py --reset --with-history   # + 질문 123건 이력�
 > 경고를 찍고 진행한다 — 스크립트 자체를 무료로 점검할 때만 쓴다.
 >
 > 실 LLM 비용 실측(2026-08-09, `03 §4.2`): 이력 123건이 **370 호출**이고 질문당 평균
-> 2.94회다(🟢🟡 3회 · 🔴 2~4회). 재질문 6건이 **+12**, 라이브 경로 보호 어서션이 **+5**
-> (Q2·Q7·Q8·Q10 번역 4 + 임베딩 1) 붙는다. 그 5회는 파이프라인 밖이라 `quota.py` 집계에
+> 2.94회다(🟢🟡 3회 · 🔴 2~4회). 재질문 6건이 **+12**, 재사용 방지 어서션이 **+13**
+> (검증 질문 12건 번역 + 임베딩 1) 붙는다. 그 13회는 파이프라인 밖이라 `quota.py` 집계에
 > 잡히지 않는다. 시간은 25~30분, API 비용은 약 **$1.3** 이다.
 > ⛔ **시드도 `daily_llm_call_limit`(500)의 적용을 받는다** — 파이프라인을 인프로세스로
 > 부르므로 카운터가 이 프로세스에 쌓인다. **382/500 = 76% 소진**이고 여유는 118회 ≈
@@ -98,6 +98,7 @@ from app.services.pipeline import ingest, prompts, retrieval  # noqa: E402
 from app.services.pipeline.llm_schemas import TranslationOut  # noqa: E402
 from scripts.demo_questions import (  # noqa: E402
     BY_KEY,
+    CANONICAL,
     HISTORY,
     NO_APPROVAL_KEYS,
     NO_RED_RESOLVE_KEYS,
@@ -165,6 +166,17 @@ APPROVE_TAKE = 2
 # 확정된 공식 Q&A 를 다시 묻는 질문 수. 이력에 ② 재사용 경로를 남기는 유일한 자리다
 # (`run_reuse_followups` 독스트링 — 순서 때문에 본 이력에서는 재사용이 성립하지 않는다).
 REUSE_FOLLOWUP_COUNT = 6
+
+# 검증 질문셋(`08 §3` 12건)의 **원문**. 이 문장들은 공식 Q&A 가 되면 안 된다.
+#
+# ⚠️ 계열(`family`) 제외와 다른 축이다. `NO_APPROVAL_KEYS` 는 Q2·Q8·Q10 **계열 전체**를
+# 막지만, 나머지 계열은 원문과 패러프레이즈가 섞여 있고 승인 선택이 `index % 5 < 2` 라
+# **어느 원문이 승인될지가 등급 분포에 따라 매번 달라진다.** 실제로 재시드 한 번에
+# Q4·Q5·Q6·Q11·Q12·Q13 여섯 건의 원문이 공식 Q&A 가 되어, `eval_questions.py` 가
+# 그 질문들을 물었을 때 파이프라인이 아니라 ② 재사용으로 빠졌다 — sim_raw 가 1.0000 이고
+# 매칭률·인용이 전부 null 이라 **검증 자체가 성립하지 않았다.**
+# 패러프레이즈는 그대로 두므로 이력의 다양성은 잃지 않는다.
+CANONICAL_TEXTS: frozenset[str] = frozenset(question.content_ko for question in CANONICAL)
 
 # 🔴 카드 확정 비율 — 담당자가 인박스를 절반쯤 처리한 상태를 만든다.
 RED_RESOLVE_EVERY = 2
@@ -482,6 +494,7 @@ async def inject_approvals(
         and item.grade in (GRADE_GREEN, GRADE_YELLOW)
         and item.answer_state == ANSWER_STATE_DRAFT
         and item.family not in NO_APPROVAL_KEYS
+        and item.content_ko not in CANONICAL_TEXTS
     ]
     approved = 0
 
@@ -529,6 +542,7 @@ async def resolve_red_cards(
         and item.grade == GRADE_RED
         and item.answer_state == ANSWER_STATE_DRAFT
         and item.family not in NO_RED_RESOLVE_KEYS
+        and item.content_ko not in CANONICAL_TEXTS
     ]
     resolved = 0
 
@@ -645,17 +659,29 @@ async def assert_live_questions_not_reusable(db: AsyncSession, project: Project)
     때문이다 — 이 값을 넘으면 재사용까지 가지 않더라도 "비슷한 확정 답변"이 화면에 첨부되고
     (D24), 데모 대사가 흔들린다.
 
+    ### 두 개의 선을 쓴다 — 질문마다 지켜야 할 것이 다르기 때문이다
+
+    - **라이브 시연 계열(`NO_RED_RESOLVE_KEYS`)은 `similar_threshold` 미만**이어야 한다.
+      이 선을 넘으면 재사용까지 가지 않아도 "비슷한 확정 답변"이 화면에 첨부되고(D24)
+      데모 대사가 흔들린다. `09 §2` 가 그렇게 못박았다.
+    - **나머지 검증 질문은 `reuse_threshold` 미만**이면 된다. 이 선을 넘으면 질문이 ②에서
+      재사용으로 빠져 `matching_rate`·`search_score`·인용이 전부 null 이 되고, 그러면
+      `eval_questions.py` 가 그 질문에 대해 **파이프라인을 검증하지 못한다.**
+      패러프레이즈가 공식 Q&A 가 되어 0.87 근처까지 올라오는 것은 정상이므로
+      여기까지 `similar_threshold` 를 들이대면 이력 설계를 포기해야 한다.
+
     ⚠️ 임계값은 `projects.settings` 에서 읽는다. 하드코딩 금지 (룰 3).
     """
     provider = get_provider()
-    threshold = float(project.settings["similar_threshold"])
+    similar_line = float(project.settings["similar_threshold"])
+    reuse_line = float(project.settings["reuse_threshold"])
 
     # ⚠️ `NO_APPROVAL_KEYS` 가 아니라 **`NO_RED_RESOLVE_KEYS`** 다 — `resolve_red_cards` 가
     #    🔴 계열에서도 공식 Q&A 를 만들므로, 승인 제외 목록만 보면 Q7 이 무방비가 된다.
-    guarded = [BY_KEY[key] for key in sorted(NO_RED_RESOLVE_KEYS)]
+    checked = list(CANONICAL)
     # ① 과 같은 프롬프트·스키마로 영어 번역문을 만든다 — 축이 다르면 어서션이 무의미하다.
     english: list[str] = []
-    for question in guarded:
+    for question in checked:
         translated = await provider.complete_json(
             prompts.TRANSLATE_SYSTEM,
             question.content_ko,
@@ -666,20 +692,24 @@ async def assert_live_questions_not_reusable(db: AsyncSession, project: Project)
 
     vectors = await provider.embed(english)
 
-    for question, vector in zip(guarded, vectors, strict=True):
+    for question, vector in zip(checked, vectors, strict=True):
+        live = question.key in NO_RED_RESOLVE_KEYS
+        threshold = similar_line if live else reuse_line
         candidate = await retrieval.search_official_qa(
             db, project_id=project.id, query_embedding=vector
         )
         best = candidate[1] if candidate is not None else 0.0
         if best >= threshold:
+            what = "라이브 시연 경로" if live else "검증 질문셋"
             raise SystemExit(
                 f"{question.key} 원문이 공식 Q&A 와 너무 가깝다 (sim_raw={best:.4f} ≥ "
-                f"similar_threshold={threshold}). 승인 주입이 라이브 시연 경로를 오염시켰다 "
-                f"— `09 §2` 제외 목록을 확인하라.\n"
+                f"{threshold}). 승인·🔴확정 주입이 {what}을 오염시켰다 "
+                f"— `09 §2` 제외 목록과 `CANONICAL_TEXTS` 를 확인하라.\n"
                 f"  project_id={project.id} · **데이터는 남아 있다** — 질문셋을 고친 뒤 "
                 f"`--reset --with-history` 로 다시 채워라."
             )
-        log(f"  · {question.key} 원문 ↔ 최근접 공식 Q&A sim_raw={best:.4f} < {threshold} ✓")
+        mark = "라이브" if live else "검증"
+        log(f"  · {question.key:<4}[{mark}] sim_raw={best:.4f} < {threshold} ✓")
 
 
 def report_grades(asked: list[AskedQuestion]) -> int:

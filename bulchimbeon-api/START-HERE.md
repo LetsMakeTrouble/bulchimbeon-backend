@@ -36,7 +36,7 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 | 9 | M7 지표 — **✅ 완료 2026-08-08** | ~~`@prompts/07-metrics-events.md`~~ DoD 7/7, `feat(M7): events timeline and metrics` | 컷 없음(4종+정확도) |
 | 10 | M8 외부 연동 — **✅ 완료 2026-08-08** | ~~`@prompts/08-integrations.md`~~ DoD 5/5, `feat(M8): notion and github sync` | 컷 없음 (AUTORUN §1) |
 | 11 | M9 시드 — **✅ 완료 2026-08-09** | ~~`@prompts/09-seed-deploy.md 의 시드 부분`~~ 작업 1·2·3, `feat(M9): seed data, demo question set, regression tests` | ⛔ 시드는 불가 |
-| 12 | **클라우드 배포 + 리허설** — **🔶 대부분 완료 2026-08-09** | `feat(M9): cloud deploy, heading-free embedding, demo step-1 swap` · 남은 것은 아래 §다음 세션 | ⛔ 불가 |
+| 12 | **클라우드 배포 + 리허설** — **✅ 완료 2026-08-09** | 체크리스트 전 항목 통과 · 시나리오 A·B 재현 · 🟢 표본 37건 | ⛔ 불가 |
 
 > ### ⛔ 배포 세션이 **반드시** 해야 하는 것 — `--with-history` 실행
 > M9 는 시드 **코드**까지만 했다. 질문 58건을 실제 LLM 으로 돌리는
@@ -64,79 +64,58 @@ M-1 캘리브레이션은 **실 임베딩 호출이 필수**라 FakeLLM으로 �
 
 ## 다음 세션 프롬프트 (그대로 복붙)
 
-> ## 🔶 배포는 끝났다. 남은 것은 **지표 표본 결정 + 발표 전 재시드**다.
+> ## ✅ M9 완료. 데모는 지금 바로 시연 가능한 상태다.
 >
-> **배포 URL**: `https://bulchimbeon-api-production.up.railway.app` (Railway `prolific-inspiration`)
+> **배포 URL**: `https://bulchimbeon-api-production.up.railway.app`
+> **데모 프로젝트**: `f1adb3c6-1e6f-4b6c-b6bf-f256a0f17f82` (GlobalMart JP Launch)
 > `docs/09-deploy-notes.md` 에 URL·환경변수·시드 방법·롤백·확인 결과가 전부 있다. **먼저 읽어라.**
 >
-> ### ✅ 이번 세션이 끝낸 것
-> - Railway 배포 + 마이그레이션(0001→0010) + 볼륨 + 도메인
-> - 체크리스트 대부분 통과 — `--workers 1` PID 실측 · **SSE 정확히 900초 끊김 → 재연결 200 +
->   `unread_count` 1회** · `x-accel-buffering: no` · CORS · pgvector 0.8.6 · 청크 22
-> - **시나리오 A·B 전 구간 재현** (`09 §7.1` 에 증적). Q10 이 `official_qa.reuse_count=1` 로
->   확정 원문 그대로 재사용되는 것까지 확인했다.
-> - **임베딩에서 헤딩 줄 제외** — M-1 임계값이 측정한 텍스트와 운영이 임베딩하는 텍스트를
->   일치시켰다. Q8 sim 0.4312 → 0.4112 로 내려가 **강제 🔴 이 복원**됐고 시나리오 B 가 살아났다.
-> - **데모 1단계 Q1 → Q2** (사용자 결정). Q1 은 실측 66 🟡, Q2 는 84 🟢.
+> ### 지금 상태 — 손대지 않아도 시연된다
+> - 체크리스트 **전 항목 통과** (`09 §7`)
+> - **시나리오 A** Q2 → 🟢 + 인용 / **시나리오 B** Q8 → 🔴 `no_evidence` 재현 확인
+> - **Q8·Q10·Q2 원문은 아직 소진되지 않았다** — 라이브 시연 경로가 살아 있다
+> - 지표: 자동응답률 **0.7724**(목표 0.7) · 🟢 정확도 **0.7838**(표본 37) ·
+>   🟡 정확도 **0.8103**(표본 58) · 절약 대기시간 2280시간
 >
-> ### ⛔ 남은 것 1 — 🟢 표본 16건 (기준 30건). **결정이 필요하다**
-> `--reset --with-history` 는 돌렸다. 결과: 질문 58건 · 발행 42건 · **🟢 16 · 🟡 26 · 🔴 16**.
-> D25 기준 미달로 시드가 **종료 코드 1**로 끝났고 `grade_accuracy` 가 전 등급 "표본 부족"이다.
->
-> ⚠️ **"질문셋을 늘리고 다시"로는 닫히지 않는다.** 실측 🟢 발생률이 **27.6%** 라 30건을 채우려면
-> 질문이 **110건쯤** 필요한데 `08 §5` 는 45~60건으로 못박혀 있고 테스트가 강제한다
-> (`test_history_size_and_green_weighting`). 셋 중 하나를 **사용자에게 물어서** 정해라:
-> 1. `08 §5` 상한을 올린다 (테스트도 함께) — 이력 재실행 약 20분
-> 2. `accuracy_service.MIN_SAMPLE`(30) 을 낮춘다 — D25 변경
-> 3. `grade_accuracy` 만 "표본 부족"으로 두고 발표한다 — 나머지 지표는 이미 나온다
->    (`auto_answer_rate` **0.719** / 목표 0.7 · `saved_wait_hours` 1104)
->
-> ### ⛔ 남은 것 2 — **발표 전날 반드시 재시드**
-> 리허설에서 Q8 을 확정해 **공식 Q&A 가 이미 생겼다**. 그대로 두면 데모 당일 Q8 이 재사용으로
-> 빠져 시나리오 B 가 사라진다. 카드 상세를 호출해 `first_viewed_at` 도 오염됐다(M7
-> `card_handle_30s_rate`). 둘 다 재시드로 해소된다:
+> ### ⛔ 발표 전에 반드시 할 것
+> **리허설에서 Q8 을 확정(edit)했다면 재시드하라.** 확정하면 공식 Q&A 가 생겨
+> 데모 당일 Q8 이 재사용 경로로 빠지고 **시나리오 B 가 통째로 사라진다.**
+> 카드 상세(`GET /review-cards/{id}`)를 열어도 `first_viewed_at` 이 오염된다(M7 지표).
 > ```bash
-> railway ssh --service bulchimbeon-api 'su appuser -s /bin/sh -c "cd /app && python scripts/seed.py --reset --with-history"'
+> railway ssh --service bulchimbeon-api -i ~/.ssh/id_ed25519 \
+>   'su appuser -s /bin/sh -c "cd /app && /app/.venv/bin/python scripts/seed.py --reset --with-history"'
 > ```
+> 123건이라 **25~30분** 걸린다. 발표 직전에 시작하지 마라.
 >
-> ### ⛔ 남은 것 3 — 체크리스트 미확인 2건
-> - **발표 시각 DND 판정** — 발표 시각(KST)이 담당자 Mike(`America/New_York`)의 22:00~07:00 에
->   걸리는지 계산하고, **그 시각에 실제로 Q7·Q8 을 던져 🔴 이 유지되는지** 확인한다.
->   🟡 로 강등되면 D2 의 강제 🔴 예외가 구현 안 된 것이다.
-> - **일일 LLM 한도 동작 · 토큰 마스킹 · 비밀값 로그 미출력**
->   ⚠️ `quota.py` 카운터는 **프로세스 메모리**다. 스크립트 실행은 서버 카운터와 공유되지 않으므로
->   한도 확인은 **API 서버에 대고** 해야 한다.
+> ### 남은 것 (셋 다 외부 입력 대기)
+> 1. **CORS 프론트 도메인** — 아직 미정. 현재 `localhost:3000` 만 열려 있어 그 외 오리진은
+>    전부 400 이다. 도메인 받으면 `railway variables --set "CORS_ORIGINS=..."` 로 끝난다
+>    (재빌드 불필요).
+> 2. **로컬 커밋 푸시** — `origin/main` 보다 앞서 있다(사용자 결정으로 보류 중).
+> 3. **발표 시각 확정 시 Q7 재확인** — DND 는 **KST 11:00~20:00** 이라 한국 낮 발표는
+>    거의 DND 안이다. 강제 🔴 유지는 실측 확인했지만(`09 §7.3`), 확정 시각에 한 번 더 던져라.
 >
-> ### ⚠️ 알아 둘 것 — 실측이 `08 §3` 기대표와 여러 건 어긋난다
-> 실 LLM 12건 대조에서 **7/12 일치**. Q1(66)·Q3(53)·Q4(50)·Q11(G=67)·Q12(67) 가 🟡 인데
-> 표는 🟢 을 기대한다. **FakeLLM 회귀 테스트는 초록이다** — 표는 FakeLLM 결정론 기준이라
-> 그대로 두었다. 실 LLM 편차는 `eval_questions.py` 가 보고하는 것이 정상 동작이다.
-> 헤딩 제거는 공짜가 아니었다 — Q3·Q4 는 헤딩이 곧 판별 신호였던 계열이라 **나빠졌다**.
->
-> ### 🔧 Railway 함정 3개 (다시 밟지 마라 — `09 §2`·§4 에 상세)
-> 1. **`startCommand` 를 `sh -c '...'` 로 감싼 것은 필수다.** Railway 가 `${...}` 를 셸보다 먼저
->    치환해 `${PORT:-8000}` 을 빈 문자열로 만든다. **로그를 한 줄도 안 남기고** 죽는다.
-> 2. **볼륨은 `root:root` 로 마운트되는데 컨테이너는 `appuser` 로 돈다.** 볼륨을 새로 만들면
->    `chown appuser:appuser /app/storage` 1회 필요. 앱은 정상 기동하고 `/health` 도 200이라
->    업로드를 해봐야 드러난다.
-> 3. **시드는 `railway run` 이 아니라 `railway ssh` 로, 그리고 `su appuser` 로 돌린다.**
->    `railway run` 은 로컬 실행이라 내부 DB 주소에 닿지 못한다. root 로 돌리면 업로드 파일이
->    root 소유가 된다.
+> ### ⚠️ 다음 사람이 반드시 알아야 할 것
+> - **🟢 표본을 다시 늘려야 하면 계열별 발행률부터 봐라** (`09 §7.2`). 질문을 잘 쓰는
+>   것으로는 안 된다 — Q1·Q3·Q12 에 정교한 질문 28건을 넣어도 🟢 이 **0건**이었고,
+>   Q6 은 80% 가 🟢 이었다. 섹션이 임베딩 공간에서 분리되는 정도가 결정한다.
+> - **`08 §3` 기대표와 실 LLM 결과는 여러 건 어긋난다.** FakeLLM 회귀 테스트는 초록이다 —
+>   표는 FakeLLM 결정론 기준이고, 실 LLM 편차를 `eval_questions.py` 가 보고하는 것이 정상이다.
+> - **Railway 함정 3개** (`09 §2`·§4·§5): `startCommand` 의 `sh -c '...'` 는 벗기면 안 뜬다 /
+>   볼륨을 새로 만들면 `chown appuser:appuser /app/storage` 1회 필요 /
+>   시드는 `railway run` 이 아니라 `railway ssh` + `su appuser`.
+> - **Railway SSH 검증 서비스가 간헐적으로 죽는다.** "can't verify your SSH key" 는 키 문제가
+>   아니라 Railway 쪽 일시 장애다. 1분 뒤 재시도하면 붙는다.
 
 ```
 @prompts/AUTORUN.md @docs/09-deploy-notes.md
 
-배포는 끝났다 (`https://bulchimbeon-api-production.up.railway.app`).
-START-HERE.md 의 "다음 세션 프롬프트" 를 읽고 남은 3가지를 마무리해줘.
+M9 는 끝났다. 배포·시드·체크리스트·시나리오 재현 전부 완료 상태다.
+docs/09-deploy-notes.md 를 먼저 읽고 현재 상태를 파악해줘.
 
-1. ⭐ **🟢 표본 16건 문제** — 질문셋을 늘리는 것만으로는 08 §5 의 45~60 상한 안에서
-   닫히지 않는다. AskUserQuestion 으로 선택지 3개를 물어서 정한 뒤 실행해줘.
-2. **발표 시각 DND 판정** — 발표 시각을 물어보고, 그 시각에 Q7·Q8 을 실제로 던져
-   🔴 이 유지되는지 확인.
-3. **일일 LLM 한도 · 토큰 마스킹 · 비밀값 로그 미출력** 확인.
-
-그리고 발표 전날에는 반드시 `--reset --with-history` 재시드다 —
-리허설이 Q8 을 확정해서 공식 Q&A 가 이미 생겼다.
+지금 필요한 게 있으면 말해줄 테니, 없으면 아래만 확인해줘:
+1. 클라우드 URL /health 와 데모 시나리오 A·B 가 여전히 재현되는지
+2. Q8·Q10·Q2 원문이 아직 소진되지 않았는지 (라이브 시연 경로 보존 확인)
 ```
 
 > 이후 마일스톤도 같은 형태다 — `@prompts/AUTORUN.md @prompts/01-auth-projects.md` 처럼

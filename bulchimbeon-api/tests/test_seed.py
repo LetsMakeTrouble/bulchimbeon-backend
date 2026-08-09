@@ -87,12 +87,18 @@ def test_no_approval_families_are_excluded_wholesale() -> None:
 
 
 def test_history_size_and_green_weighting() -> None:
-    """45~60건 · 🟢 기대가 35건 이상 (`08 §5` 3번).
+    """100~120건 · 🟢 기대가 35건 이상 (`08 §5` 3번).
 
     🟢 기대가 모자라면 실제 발행 🟢 이 D25 의 30건에 못 미쳐 `grade_accuracy` 가 전 등급
     "표본 부족"이 된다 — 발표 마지막 화면이 비는 실패 모드다.
+
+    ⚠️ **상한이 60 에서 130 으로 올라갔다** (배포 세션 실측, 2026-08-09).
+    "🟢 기대 35건"은 "🟢 **발행** 30건"을 보장하지 않는다 — 배포 DB 실측에서 58건 중
+    🟢 발행은 **16건(27.6%)** 뿐이었다. 패러프레이즈는 원문과 다른 문장이라 매칭률이
+    그대로 재현되지 않는다. D25 의 30건은 발행된 표본 수이므로 총량으로 흡수하는 수밖에 없다.
+    상한을 다시 낮추려면 `eval_questions.py` 로 **발행률을 먼저 재측정**하라.
     """
-    assert 45 <= len(HISTORY) <= 60
+    assert 45 <= len(HISTORY) <= 130
     green_expected = sum(1 for item in HISTORY if item.family in GREEN_EXPECTED_FAMILIES)
     assert green_expected >= 35
     # 🔴 계열은 등급 분포 확인용으로만 (`09 §2` — "8~10건에 그친다").

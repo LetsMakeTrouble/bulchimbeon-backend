@@ -27,10 +27,11 @@ from app.models.question import (
     GRADE_GREEN,
     GRADE_RED,
     QUESTION_STATUS_ANSWERED,
+    QUESTION_STATUS_HELD,
     Answer,
     Question,
 )
-from app.models.review_card import CARD_REASON_GREEN, Feedback
+from app.models.review_card import CARD_REASON_GREEN, CARD_REASON_RED, Feedback
 from app.models.user import User
 from app.services import review_card_service
 from scripts import seed
@@ -241,6 +242,91 @@ async def _plant_answered(
         answer_id=answer.id,
         answer_state=ANSWER_STATE_DRAFT,
     )
+
+
+async def _plant_red(
+    db: AsyncSession, team: Team, project: Project, family: str
+) -> seed.AskedQuestion:
+    """🔴 보류 상태 — 답변은 초안으로 남고 카드는 `red`, 선택지가 붙어 있다.
+
+    `answer-option` 은 `red` 카드에만 허용되므로(`review_card_service.ALLOWED_ACTIONS`)
+    reason 을 `CARD_REASON_RED` 로 만든다.
+    """
+    question = Question(
+        project_id=project.id,
+        asker_id=as_uuid(team.asker.id),
+        content_ko=BY_KEY[family].content_ko,
+        content_en=f"[en] {BY_KEY[family].content_ko}",
+        status=QUESTION_STATUS_HELD,
+    )
+    db.add(question)
+    await db.flush()
+
+    answer = Answer(
+        question_id=question.id,
+        grade=GRADE_RED,
+        state=ANSWER_STATE_DRAFT,
+        content_ko=None,
+        content_en=None,
+        question_struct={
+            "background": "Background.",
+            "question": "Which applies?",
+            "options": ["Option A applies.", "Option B applies."],
+        },
+    )
+    db.add(answer)
+    await db.flush()
+
+    await review_card_service.create_card(
+        db, question=question, answer=answer, reason=CARD_REASON_RED
+    )
+    return seed.AskedQuestion(
+        family=family,
+        content_ko=question.content_ko,
+        question_id=question.id,
+        grade=GRADE_RED,
+        status=QUESTION_STATUS_HELD,
+        answer_id=answer.id,
+        answer_state=ANSWER_STATE_DRAFT,
+    )
+
+
+async def test_resolve_red_cards_fills_the_red_accuracy_numerator(
+    db_session: AsyncSession, team: Team, project: Project
+) -> None:
+    """🔴 카드 확정이 `grade_accuracy` 🔴 의 분자를 만든다 (D25).
+
+    ⚠️ 이게 없으면 지표 화면에 **"🔴 정확도 0%"** 가 뜬다. 🔴 답변은 질문자에게 발행되지
+    않아 `correct` 피드백 경로가 없으므로(`accuracy_service.for_grade`), 담당자 확정만이
+    분자를 만든다. "AI 의 🔴 판정이 전부 틀렸다"로 읽히는 화면이 나오는 실패 모드다.
+    """
+    answerer = await db_session.get(User, as_uuid(team.owner.id))
+    assert answerer is not None
+
+    # 제외 계열 하나 + 확정 대상 둘. RED_RESOLVE_EVERY=2·TAKE=1 이라 대상 중 첫 건만 확정된다.
+    excluded_family = sorted(seed.NO_RED_RESOLVE_KEYS & set(BY_KEY))[0]
+    target_family = sorted(set(BY_KEY) - seed.NO_RED_RESOLVE_KEYS - LIVE_ONLY_KEYS)[0]
+
+    excluded = await _plant_red(db_session, team, project, excluded_family)
+    targets = [await _plant_red(db_session, team, project, target_family) for _ in range(2)]
+    await db_session.commit()
+
+    resolved = await seed.resolve_red_cards(db_session, project, [excluded, *targets], answerer)
+    assert resolved == 1, "제외 계열은 건너뛰고 대상 계열의 절반만 확정해야 한다"
+
+    states = dict(
+        (
+            await db_session.execute(
+                select(Answer.id, Answer.state).where(
+                    Answer.id.in_([excluded.answer_id, *[t.answer_id for t in targets]])
+                )
+            )
+        ).all()
+    )
+    assert states[excluded.answer_id] == ANSWER_STATE_DRAFT, (
+        f"{excluded_family} 계열은 확정되지 않는다 — 라이브 확인 경로가 재사용으로 빠진다"
+    )
+    assert states[targets[0].answer_id] == ANSWER_STATE_VERIFIED
 
 
 async def test_inject_feedback_skips_red_and_varies_voters(

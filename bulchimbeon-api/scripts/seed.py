@@ -154,6 +154,15 @@ FEEDBACK_TAKE = 7
 APPROVE_EVERY = 5  # 5건 중 2건에 담당자 승인
 APPROVE_TAKE = 2
 
+# 🔴 카드 확정 비율 — 담당자가 인박스를 절반쯤 처리한 상태를 만든다.
+RED_RESOLVE_EVERY = 2
+RED_RESOLVE_TAKE = 1
+
+# 🔴 확정에서 빼는 계열. `NO_APPROVAL_KEYS`(라이브 시연이 소비하는 질문)에 **Q7 을 더한다** —
+# Q7 은 `09 §5` 체크리스트가 "발표 시각에 던져 🔴 유지를 확인"하라고 지정한 질문이라,
+# 공식 Q&A 가 생기면 그때 재사용 경로로 빠져 확인 자체가 불가능해진다.
+NO_RED_RESOLVE_KEYS: frozenset[str] = NO_APPROVAL_KEYS | frozenset({"Q7"})
+
 
 def log(message: str) -> None:
     print(message, flush=True)
@@ -489,6 +498,63 @@ async def inject_approvals(
     return approved
 
 
+async def resolve_red_cards(
+    db: AsyncSession, project: Project, asked: list[AskedQuestion], answerer: User
+) -> int:
+    """🔴 카드 일부를 담당자가 **선택지로 확정**한다 — `grade_accuracy` 🔴 의 분자다 (D25).
+
+    ⚠️ **이걸 안 하면 지표 화면에 "🔴 정확도 0%" 가 뜬다.** "AI 의 🔴 판정이 전부 틀렸다"로
+    읽히지만 실제 뜻은 "시드가 🔴 을 아무도 확인하지 않았다" 이다. 🔴 답변은 질문자에게
+    발행되지 않으므로 `correct` 피드백 경로가 없고(`accuracy_service.for_grade` 분자),
+    **담당자 확정만이 분자를 만든다.** 실제 운영에서는 담당자가 인박스의 🔴 을 처리하므로
+    0% 가 나올 수 없다 — 시드가 그 절반을 재현한다.
+
+    ⛔ **`answer-option` 을 쓴다.** `approve` 는 🔴 초안이 본문 없이 남는 경우가 있어 빈 답변을
+    발행하고, `edit` 은 시드가 답 내용을 **지어내야** 한다. 선택지는 ⑦ 구조화가 만든 것이라
+    둘 다 피하면서 `05 §7.2` 의 "30초 컷" 경로를 그대로 탄다.
+
+    ⚠️ 카드 상세를 부르지 않는다 — `first_viewed_at` 오염 금지 (M7 `card_handle_30s_rate`).
+    """
+    candidates = [
+        item
+        for item in asked
+        if item.answer_id is not None
+        and item.grade == GRADE_RED
+        and item.answer_state == ANSWER_STATE_DRAFT
+        and item.family not in NO_RED_RESOLVE_KEYS
+    ]
+    resolved = 0
+
+    for index, item in enumerate(candidates):
+        if index % RED_RESOLVE_EVERY >= RED_RESOLVE_TAKE:
+            continue
+
+        card = await db.scalar(
+            select(ReviewCard).where(ReviewCard.answer_id == item.answer_id).limit(1)
+        )
+        if card is None or card.status == CARD_STATUS_RESOLVED:
+            continue
+
+        # 선택지가 없으면 건너뛴다 — ⑦ 구조화가 실패한 답변이다.
+        answer = await db.get(Answer, item.answer_id)
+        options = (answer.question_struct or {}).get("options") if answer else None
+        if not options:
+            continue
+
+        await review_card_service.resolve_card(
+            db,
+            card=card,
+            actor=answerer,
+            action=review_card_service.ACTION_ANSWER_OPTION,
+            option_index=0,
+        )
+        await db.commit()
+        resolved += 1
+
+    log(f"· 🔴 카드 {resolved}건 확정 (제외 계열: {', '.join(sorted(NO_RED_RESOLVE_KEYS))})")
+    return resolved
+
+
 async def assert_live_questions_not_reusable(db: AsyncSession, project: Project) -> None:
     """`09 §2` 승인 주입 어서션 — 명시적 제외 목록의 **추가 안전망**.
 
@@ -612,6 +678,7 @@ async def main(argv: list[str] | None = None) -> int:
         asked = await run_history(db, project, askers)
         await inject_feedback(db, asked, askers)
         await inject_approvals(db, project, asked, answerer)
+        await resolve_red_cards(db, project, asked, answerer)
 
         log("")
         log("── 라이브 시연 경로 보호 확인 (`09 §2`) ────────────────")

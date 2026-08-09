@@ -8,8 +8,8 @@
 | 항목 | 값 |
 | --- | --- |
 | 배포처 | Railway |
-| 서비스 | (배포 후 기입) |
-| 공개 URL | (배포 후 기입) |
+| 서비스 | `bulchimbeon-api` (프로젝트 `prolific-inspiration`) |
+| 공개 URL | `https://bulchimbeon-api-production.up.railway.app` |
 | DB | Railway Postgres **18.4** / pgvector **0.8.6** (M-1에서 확인, 배포 세션에서 재확인) |
 | 이미지 | 레포 루트 `Dockerfile` (멀티스테이지 uv) |
 | 배포 설정 | `railway.json` |
@@ -64,10 +64,14 @@ unavailable" 로만 실패해서 원인을 가리킨다. 같은 이미지를 로
 | `DATABASE_URL` | `postgresql+asyncpg://…` | ⛔ **아래 §3.1 참조** |
 | `LLM_PROVIDER` | `openai` | `fake`면 임베딩이 해시라 검색이 무의미해진다 |
 | `OPENAI_API_KEY` | 실 키 | 전 파이프라인이 죽는다 |
-| `LLM_MODEL_ANSWER` | `gpt-5-mini` | |
-| `LLM_MODEL_VERIFY` | `gpt-5-mini` | |
-| `LLM_MODEL_TRANSLATE` | `gpt-5-mini` | |
-| `LLM_REASONING_EFFORT` | `minimal` | 지연 예산(🟢 25초)을 못 지킨다 |
+| `LLM_MODEL_ANSWER` | `gpt-5.6-terra` | 단계별 배정은 `03 §4.1` |
+| `LLM_MODEL_VERIFY` | `gpt-5.6-sol` | ⛔ 뚫리면 환각이 🟢로 발행된다 |
+| `LLM_MODEL_REUSE_GATE` | `gpt-5.6-sol` | ⛔ 뚫리면 틀린 확정답이 재사용된다 |
+| `LLM_MODEL_STRUCT` | `gpt-5.6-terra` | |
+| `LLM_MODEL_TRANSLATE` | `gpt-5.6-luna` | ① 질문 번역 전용 |
+| `LLM_MODEL_LESSON` | `gpt-5.6-luna` | |
+| `LLM_MODEL_ANSWER_TRANSLATE` | `gpt-5.6-terra` | ⛔ TRANSLATE와 합치지 마라 (`03 §4.1`) |
+| `LLM_REASONING_EFFORT` | `low` | ⛔ `minimal`은 gpt-5.6에서 **400**이다 |
 | `LLM_TIMEOUT_SECONDS` | `45` | |
 | `LLM_PIPELINE_DEADLINE_SECONDS` | `25` | |
 | `LLM_PIPELINE_DEADLINE_RED_SECONDS` | `35` | |
@@ -128,24 +132,34 @@ railway ssh --service bulchimbeon-api \
 **로컬에서** 명령을 실행한다. 그러면 (a) 업로드 원본이 로컬에 남고 (b) `DATABASE_URL`이
 `postgres.railway.internal`을 가리키는데 이 주소는 **바깥에서 접속되지 않아** 어차피 실패한다.
 
+⚠️ **`su appuser` 를 거친다.** `railway ssh` 는 root 로 붙으므로 그냥 돌리면 업로드 파일이
+root 소유로 깔려 앱(UID 10001)이 그 뒤에 지우지도 다시 쓰지도 못한다 (§4).
+
 ```bash
+SSH="railway ssh --service bulchimbeon-api -i ~/.ssh/id_ed25519"
+RUN='su appuser -s /bin/sh -c'
+
 # 1) 기본 시드 — 문서 4개 + 인제스트만
-railway ssh --service bulchimbeon-api python scripts/seed.py --reset
+$SSH "$RUN 'cd /app && /app/.venv/bin/python scripts/seed.py --reset'"
 
 # 2) 실 LLM 대조 (12건, 저렴) — 이력보다 먼저 돌린다
-railway ssh --service bulchimbeon-api python scripts/eval_questions.py
+$SSH "$RUN 'cd /app && /app/.venv/bin/python scripts/eval_questions.py'"
 
-# 3) 이력 주입 (58건, 약 175~235 LLM 호출)
-railway ssh --service bulchimbeon-api python scripts/seed.py --reset --with-history
+# 3) 이력 주입 (123건, 약 25~30분)
+$SSH "$RUN 'cd /app && /app/.venv/bin/python scripts/seed.py --reset --with-history'"
 ```
+
+⚠️ **Railway SSH 검증 서비스가 간헐적으로 죽는다.** `can't verify your SSH key` 는 키
+문제가 아니라 Railway 쪽 일시 장애다 — 1분 뒤 재시도하면 붙는다. 배포 세션에서 2번 겪었다.
+긴 시드는 재시도 루프로 감싸 두는 편이 안전하다.
 
 `seed/*.md` 4개는 이미지 안에 있어야 한다. Dockerfile이 `COPY seed ./seed`를 빠뜨리면
 `scripts/seed.py:100`의 `SEED_DIR`이 없어서 `FileNotFoundError`로 죽는다 (배포 세션에서 실제로 났다).
 
-- 2번을 1번과 3번 **사이**에 두는 이유는 M-1 임계값이 헤딩 줄 없는 텍스트로 측정됐다는
-  미해결 건(`START-HERE.md`) 때문이다. 12건은 싸므로, 어긋나면 58건을 채우기 전에 잡는다.
-- 3번은 🟢 발행이 **30건 미만이면 종료 코드 1**로 끝난다. 그때는
-  `scripts/demo_questions.py`의 🟢 계열 변형을 늘리고 다시 돌린다.
+- 2번을 1번과 3번 **사이**에 두는 이유는 12건이 싸기 때문이다. 임계값이나 모델 배정이
+  바뀌었으면 여기서 먼저 드러나고, 123건을 25분 들여 채우기 전에 잡을 수 있다.
+- 3번은 🟢 발행이 **30건 미만이면 종료 코드 1**로 끝난다. 그때는 **계열별 발행률을 먼저 보고**
+  (§7.2) 높은 쪽(Q6·Q13)에만 변형을 더한 뒤 다시 돌린다. 넓게 뿌리면 🔴만 늘어난다.
 - ⛔ **리허설에서 Q8을 확정(edit)했다면 발표 전에 3번을 다시 돌린다.** 확정하면 공식 Q&A가
   생겨 데모 당일 시나리오 B가 "재사용"으로 빠져 통째로 사라진다.
 
@@ -202,15 +216,20 @@ railway ssh --service bulchimbeon-api python scripts/seed.py --reset --with-hist
 
 ### 7.2 🟢 표본 — 이력 123건으로 해결 (사용자 결정 2026-08-09)
 
-최종: **질문 123건 · 발행 95건 · 🟢 37건** → 시드 종료 코드 0.
+최종: **질문 123건 · 발행 89건 · 🟢 32건** → 시드 종료 코드 0.
+데모 프로젝트 `1ea9e9da-0d86-4d8c-878b-2163c43178a4` (gpt-5.6 배정 + 🔴 확정 반영).
 
 | 지표 | 값 |
 | --- | --- |
-| `auto_answer_rate` | **0.7724** (목표 0.7) · 🟢 37 / 🟡 58 / 🔴 28 |
-| `grade_accuracy` 🟢 | 표본 **37** · `sufficient: true` · 정확도 **0.7838** |
-| `grade_accuracy` 🟡 | 표본 **58** · `sufficient: true` · 정확도 **0.8103** |
-| `grade_accuracy` 🔴 | 표본 28 · "참고용" — `08 §4` 가 정상이라고 적어 둔 상태다 |
-| `saved_wait_hours` | 2280시간 (근거 95건) |
+| `auto_answer_rate` | **0.7236** (목표 0.7) · 🟢 32 / 🟡 57 / 🔴 34 |
+| `grade_accuracy` 🟢 | 표본 **32** · 정확도 **0.8125** |
+| `grade_accuracy` 🟡 | 표본 **57** · 정확도 **0.8947** |
+| `grade_accuracy` 🔴 | 표본 **34** · 정확도 **0.4412** (§7.4 참조) |
+| `saved_wait_hours` | 2136시간 (근거 89건) |
+
+⚠️ **🟢 은 실행마다 흔들린다** — 같은 질문셋 123건으로 37 → 34 → 32 였다. LLM 출력이
+매번 달라지기 때문이고, **기준 30 에 여유가 2건뿐이다.** 재시드에서 30 밑으로 떨어지면
+`08 §5` 구성표대로 **Q6·Q13 계열**(발행률이 가장 높다)에 몇 건을 더한다.
 
 ### 7.3 발표 시각 DND 판정
 
@@ -262,3 +281,26 @@ DND 강등 대상은 `low_confidence` 뿐이라는 규칙이 배포 환경에서
 `eval_questions.py` 나 직전 시드 로그로 **계열별 발행률을 먼저 보고** 높은 쪽에만 더한다.
 Q6·Q13 은 이미 포화에 가까우므로, 더 필요하면 질문을 억지로 늘리기보다
 `MIN_SAMPLE` 조정이나 시드 문서 보강을 먼저 검토하는 편이 정직하다.
+
+### 7.4 🔴 정확도가 0% 로 뜨던 문제 (사용자 결정 2026-08-09)
+
+이력을 123건으로 늘리자 🔴 표본이 28 → 34 로 30 을 넘겨 `sufficient: true` 가 됐고,
+그 순간 지표 화면에 **"🔴 정확도 0%"** 가 떴다. `08 §4` 는 "🟡·🔴 은 표본 부족 표기가
+정상"이라고 적어 두어 이 상태를 예상하지 못했다.
+
+**0% 는 "AI 의 🔴 판정이 전부 틀렸다"는 뜻이 아니다.** `accuracy_service.for_grade` 의
+분자는 `state='verified'` 또는 `correct` 피드백인데, 🔴 답변은 질문자에게 발행되지 않아
+correct 피드백 경로가 없고 `inject_approvals` 는 🟢·🟡 만 처리했다 → 분자가 구조적으로 0.
+실제 운영에서는 담당자가 인박스의 🔴 을 처리하므로 0% 가 나올 수 없다.
+
+조치: `seed.resolve_red_cards()` 가 🔴 카드의 절반을 **선택지로 확정**한다
+(`answer-option`). 결과 **정확도 0.4412 (표본 34)**.
+
+⛔ **액션은 `answer-option` 이어야 한다.** `approve` 는 🔴 초안이 본문 없이 남는 경우가
+있어 **빈 답변을 발행**하고, `edit` 은 시드가 답 내용을 **지어내야** 한다. 선택지는
+⑦ 구조화가 만든 것이라 둘 다 피하면서 `05 §7.2` 의 "30초 컷" 경로를 그대로 탄다.
+
+⛔ **제외 목록은 `NO_APPROVAL_KEYS` 가 아니라 `NO_RED_RESOLVE_KEYS` 다 — Q7 이 더 들어간다.**
+Q7 은 §7.3 이 "발표 시각에 던져 🔴 유지를 확인하라"고 지정한 질문이라, 공식 Q&A 가 생기면
+그때 재사용 경로로 빠져 **확인 자체가 불가능해진다.** 재시드 후 실측으로 확인했다 —
+Q2 `green` · Q8 `no_evidence` · Q7 `conflict` 셋 다 보존됐다.

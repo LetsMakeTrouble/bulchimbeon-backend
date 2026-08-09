@@ -91,10 +91,26 @@ class Settings(BaseSettings):
     # LLM — 모델명은 전부 env. 프로바이더 추상화로 교체 가능 (03 §1)
     llm_provider: str = "openai"  # openai | fake
     openai_api_key: str = ""
-    llm_model_answer: str = "gpt-5-mini"
-    llm_model_verify: str = "gpt-5-mini"
-    llm_model_translate: str = "gpt-5-mini"
-    llm_reasoning_effort: str = "minimal"
+    # --- 단계별 모델 배정 (사용자 결정 2026-08-09) -------------------------------------
+    # 기준은 "중요도"가 아니라 **실패했을 때 회복 가능한가**다.
+    # 뒤에 걸러 줄 단계가 있으면 싼 모델로 충분하고, 없으면 비싼 모델을 쓴다.
+    llm_model_answer: str = "gpt-5.6-terra"  # ④ 답변 생성 — 뒤에 ⑤가 걸러 준다
+    llm_model_verify: str = "gpt-5.6-sol"  # ⑤ 근거 검증 — 뚫리면 환각이 🟢로 발행된다
+    llm_model_reuse_gate: str = "gpt-5.6-sol"  # 재사용 판정 — 뚫리면 틀린 확정답이 퍼진다
+    llm_model_struct: str = "gpt-5.6-terra"  # ⑦ 카드 구조화 — 담당자가 읽고 보정한다
+    llm_model_translate: str = "gpt-5.6-luna"  # ① 질문 ko→en — 틀려도 등급만 떨어진다
+    llm_model_lesson: str = "gpt-5.6-luna"  # 교훈 추출 — 배치, 지연·정확도 여유 있음
+    # ⚠️ **담당자 확정문 en→ko 는 번역과 같은 슬롯에 두지 않는다.**
+    # 이 번역 결과가 곧 질문자가 읽는 확정 답변이고, 룰 4(확정 ko 원문 재번역 금지)에 따라
+    # 공식 Q&A 로 그대로 굳어 재사용된다. 담당자는 영어로 쓰고 질문자는 한국어를 읽으므로
+    # **오역을 잡아 줄 사람이 경로에 없다.** 싼 모델로 내리면 안 되는 이유다.
+    llm_model_answer_translate: str = "gpt-5.6-terra"
+
+    # ⚠️ **`minimal` 은 gpt-5.6 계열에서 400 이다** (2026-08-09 실측).
+    # `minimal` 은 gpt-5-mini 전용이었다. 5.6 계열의 최소값은 `low` 이며, 실측상 `low` 로도
+    # 데드라인(🟢🟡 25s · 🔴 35s)에 여유가 크다 — terra p50 1.2s / sol p50 1.7s (근거 6청크).
+    # gpt-5-mini 도 `low` 를 받으므로 두 계열을 섞어 써도 이 값 하나로 동작한다.
+    llm_reasoning_effort: str = "low"
     llm_timeout_seconds: int = 45
     llm_pipeline_deadline_seconds: int = 25  # 🟢/🟡 경로
     llm_pipeline_deadline_red_seconds: int = 35  # 🔴 경로 (⑦구조화 1회 추가)

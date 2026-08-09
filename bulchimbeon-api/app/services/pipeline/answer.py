@@ -329,7 +329,7 @@ async def _pipeline(db: AsyncSession, question_id: UUID) -> _Outcome | None:
                     f"[QUESTION A] {official_qa.question_en}\n[QUESTION B] {question.content_en}"
                 ),
                 schema=SameQuestionOut,
-                model=env_settings.llm_model_translate,
+                model=env_settings.llm_model_reuse_gate,
             )
             if gate["same_question"]:
                 return await _publish_reused(ctx, official_qa, best_similarity)
@@ -750,7 +750,7 @@ async def _publish_generated(
                 evidence=evidence,
             ),
             schema=QuestionStructOut,
-            model=env_settings.llm_model_translate,
+            model=env_settings.llm_model_struct,
         )
     elif is_red:
         logger.warning(

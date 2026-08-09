@@ -141,10 +141,14 @@ TEST_DATABASE_URL=postgresql+asyncpg://bulchimbeon:bulchimbeon@localhost:5432/bu
 # LLM
 LLM_PROVIDER=openai                 # openai | fake
 OPENAI_API_KEY=sk-...
-LLM_MODEL_ANSWER=gpt-5-mini         # ④ 답변 생성
-LLM_MODEL_VERIFY=gpt-5-mini         # ⑤ 근거 검증 전용 — 생성과 분리 가능하게 별도 env
-LLM_MODEL_TRANSLATE=gpt-5-mini      # ① 번역 · ⑦ 구조화
-LLM_REASONING_EFFORT=minimal        # M-1 실측: 지원됨(400 아님). 지연 예산 달성의 필수 조건
+LLM_MODEL_ANSWER=gpt-5.6-terra           # ④ 답변 생성
+LLM_MODEL_VERIFY=gpt-5.6-sol             # ⑤ 근거 검증
+LLM_MODEL_REUSE_GATE=gpt-5.6-sol         # 재사용 판정 "같은 질문인가?"
+LLM_MODEL_STRUCT=gpt-5.6-terra           # ⑦ 카드 구조화
+LLM_MODEL_TRANSLATE=gpt-5.6-luna         # ① 질문 ko→en
+LLM_MODEL_LESSON=gpt-5.6-luna            # 교훈 추출 (배치)
+LLM_MODEL_ANSWER_TRANSLATE=gpt-5.6-terra # 담당자 확정문 en→ko (⚠️ 아래 §4.1)
+LLM_REASONING_EFFORT=low            # ⚠️ minimal 은 gpt-5.6 계열에서 400 (§4.1)
 LLM_TIMEOUT_SECONDS=45              # 단건 호출 타임아웃 (M-1 실측 p90 8.09s 대비 충분)
 LLM_PIPELINE_DEADLINE_SECONDS=25    # 🟢/🟡 경로 데드라인 (3회 호출, M-1 실측 p90 24.3s)
 LLM_PIPELINE_DEADLINE_RED_SECONDS=35  # 🔴 경로 데드라인 (4회 호출 — ⑦구조화 추가, M-1 실측 p90 32.4s)
@@ -162,6 +166,44 @@ INTEGRATION_ENCRYPTION_KEY=change-me-32bytes
 - **금지 파라미터**: `temperature` / `top_p` / `presence_penalty` / `frequency_penalty` / `seed` — GPT-5 계열에 전달하면 400. 프로바이더에서 화이트리스트로 강제한다. `max_tokens` 대신 **`max_completion_tokens`**.
 - **`EMBEDDING_DIM`은 컬럼 차원을 바꾸는 스위치가 아니다.** 기동 시 `EMBEDDING_DIM != 1536`이면 **fail-fast** (`04` 문서 상단).
 - `STORAGE_DIR`은 **절대 경로**로 둔다. 상대 경로는 uvicorn 실행 위치·컨테이너 WORKDIR에 따라 다른 디렉터리를 가리켜 "업로드는 됐는데 파일이 없다"를 만든다.
+
+### 4.1 단계별 모델 배정 (사용자 결정 2026-08-09)
+
+**배정 기준은 "그 단계가 중요한가"가 아니라 "틀렸을 때 뒤에서 잡아 주는가"다.**
+
+| 단계 | env | 모델 | 틀렸을 때 |
+| --- | --- | --- | --- |
+| ⑤ 근거 검증 | `LLM_MODEL_VERIFY` | **sol** | ⛔ **환각이 🟢로 발행된다.** 뒤에 잡아 줄 단계가 없다 |
+| 재사용 판정 | `LLM_MODEL_REUSE_GATE` | **sol** | ⛔ 틀린 확정 답변이 다른 사람에게 재사용된다. 조용히 퍼진다 |
+| ④ 답변 생성 | `LLM_MODEL_ANSWER` | terra | ⑤가 🟡/🔴로 내려 준다 |
+| ⑦ 카드 구조화 | `LLM_MODEL_STRUCT` | terra | 담당자가 읽고 판단하므로 사람이 보정한다 |
+| 확정문 en→ko | `LLM_MODEL_ANSWER_TRANSLATE` | terra | ⛔ 아래 참조 |
+| ① 질문 ko→en | `LLM_MODEL_TRANSLATE` | luna | 검색이 어긋나 등급이 떨어질 뿐이다 |
+| 교훈 추출 | `LLM_MODEL_LESSON` | luna | 배치이고 담당자 승인을 거친다 |
+
+⚠️ **가장 강한 모델은 답변 생성이 아니라 검증에 쓴다.** 직관과 반대지만,
+답변은 실수해도 ⑤가 잡고 ⑤가 실수하면 잡을 것이 없다 — 환각 방어 2겹의 마지막 겹이다.
+
+⛔ **`LLM_MODEL_ANSWER_TRANSLATE` 를 `LLM_MODEL_TRANSLATE` 와 합치지 마라.**
+전자는 `review_card_service` 의 담당자 확정문 en→ko 경로이고, 그 결과가 **질문자가 읽는
+확정 답변**이자 룰 4(확정 ko 원문 재번역 금지)로 공식 Q&A 에 그대로 굳는다.
+담당자는 영어로 쓰고 질문자는 한국어를 읽으므로 **오역을 잡아 줄 사람이 경로에 없다.**
+후자는 검색용 질문 번역이라 실패해도 등급만 떨어진다. 성격이 정반대다.
+
+⚠️ **`LLM_REASONING_EFFORT=minimal` 은 gpt-5.6 계열에서 400 이다** (2026-08-09 실측).
+`minimal` 은 gpt-5-mini 전용이었다. 5.6 의 최소값은 `low` 이고, gpt-5-mini 도 `low` 를
+받으므로 두 계열 혼용이 이 값 하나로 된다. 실측 지연(근거 6청크 기준 p50):
+terra 1.19s · luna 1.35s · sol 1.73s · gpt-5-mini(minimal) 1.78s —
+**terra 가 종전 모델보다 빠르다.** 3~4회 호출을 곱해도 데드라인(25s/35s)에 여유가 크다.
+
+⚠️ **모델을 바꾸면 등급 분포가 이동한다.** ⑤가 G(근거 점수)를 만들고 매칭률은 `min(S,G)`
+이므로, 검증 모델 교체는 🟢/🟡 경계를 직접 흔든다. 교체 후에는 반드시
+`scripts/eval_questions.py` 로 12건을 대조하고, 필요하면 이력을 다시 채운다.
+**발표 직전에 할 작업이 아니다.**
+
+⛔ **`EMBEDDING_MODEL` 은 이 논의에서 제외한다.** 임베딩을 바꾸면 전체 재인제스트에 더해
+**임계값 5종을 전부 재측정**해야 한다 (`09 §7.2` — 제목 줄 한 줄 차이로 Q8 이 🔴↔🟡 로
+뒤집힌 사례가 있다).
 
 ## 5. 실행 방법
 

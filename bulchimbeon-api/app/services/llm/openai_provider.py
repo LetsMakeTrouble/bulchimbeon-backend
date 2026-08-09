@@ -151,6 +151,8 @@ class OpenAIProvider:
             ),
             user=text,
             schema=TextOut,
-            model=settings.llm_model_translate,
+            # ⚠️ `llm_model_translate`(① 질문 번역)가 아니다 — 이 경로는 담당자 확정문
+            # en→ko 이고, 그 결과가 **재번역 금지된 확정 원문**으로 굳는다 (룰 4).
+            model=settings.llm_model_answer_translate,
         )
         return str(result["text"])

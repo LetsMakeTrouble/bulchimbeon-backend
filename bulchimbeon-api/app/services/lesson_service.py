@@ -97,7 +97,7 @@ async def extract_candidate(
                 corrected_en=answer.content_en,
             ),
             LessonOut,
-            model=env_settings.llm_model_answer,
+            model=env_settings.llm_model_lesson,
         )
     except LLMProviderError:
         # 룰 9 — 담당자의 확정을 교훈 추출 실패로 되돌리지 않는다. 부수 산출물만 포기한다.

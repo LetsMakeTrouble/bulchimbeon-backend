@@ -161,6 +161,56 @@ railway ssh --service bulchimbeon-api python scripts/seed.py --reset --with-hist
 `--reset`은 프로젝트 삭제 API가 MVP 범위 밖이라 **DB 레벨에서** 정리한다(D19).
 데모 데이터 외의 것을 지우지 않는지 확인하고 쓴다.
 
-## 7. 배포 후 확인한 것
+## 7. 배포 후 확인한 것 (2026-08-09)
 
-(배포 세션 실행 결과로 채운다)
+| 체크리스트 (`09 §5`) | 결과 |
+| --- | --- |
+| `/health` ok · Swagger 접근 | ✅ `{"status":"ok","db":"ok"}` · `/docs` 200 · **58 operations** |
+| 배포 DB pgvector 권한 · `extversion ≥ 0.8.0` | ✅ `CREATE EXTENSION` 성공 · **0.8.6** · pg 18.4 |
+| 시작 커맨드 `--workers 1` | ✅ **PID 1 cmdline 실측** (대시보드 눈확인 아님) |
+| 데모 §4 1~6단계 재현 | ✅ 아래 §7.1 |
+| 등급 확정 지연 (`elapsed_ms`) | ✅ 최대 8.8초 · **데드라인 초과 0건** (🟢🟡 25s · 🔴 35s) |
+| **SSE 15분 재연결** | ✅ **정확히 900초에 끊김**(curl rc=92) → 새 티켓 재연결 200 · `notification.unread_count` **1회** 수신 |
+| SSE 버퍼링 | ✅ `x-accel-buffering: no` · ping 62회 · `answer.completed` 4 · `notification.created` 4 |
+| CORS | ✅ `localhost:3000` 허용 · 미등록 오리진 **400 차단** |
+| 시드 후 `count(*) FROM chunks` | ✅ **22** (≥20) |
+| `STORAGE_DIR` 볼륨 재시작 생존 | ✅ 재배포 넘어 파일 유지 · `appuser` 소유 |
+| 발표 시각 DND 판정 | ⛔ **미확인** — 발표 시각이 정해지면 그 시각에 Q7·Q8 을 던져 🔴 유지를 확인해야 한다 |
+| 일일 LLM 한도 · 토큰 마스킹 | ⛔ **미확인** |
+
+### 7.1 시나리오 재현 증적
+
+**시나리오 A** — Q2 "액세스 토큰 만료 시간이 어떻게 되나요?"
+→ `status=answered` · `grade=green` · 인용 1건(`Orders API Specification v2.1 > Authentication`)
+→ 답변 "액세스 토큰은 24시간 후에 만료됩니다."
+
+**시나리오 B** — 전 구간 재현됨
+1. Q8 "환불 정책이 일본 리전에도 동일하게 적용되나요?" → `status=held` (🔴 보류)
+2. 담당자 카드 `edit` "Japan is 20 days (local law)."
+   → `answer.state=verified` · `official_qa_id` 생성 · `lesson_candidate_id` 생성
+3. **질문자 GET → `status=answered` · `state=verified`** (`held → answered` 전이)
+   → 답변 "일본은 20일입니다(현지법)."
+4. Q10 "일본 리전 환불 정책도 동일하게 적용되나요?" (민준)
+   → `grade=green` · `state=verified` · `official_qa.reuse_count=1`
+   → **확정 한국어 원문 그대로 재사용** — 재번역 없음 (룰 4)
+
+⚠️ **리허설이 Q8 을 확정했으므로 공식 Q&A 가 이미 존재한다.**
+발표 전에 반드시 `--reset --with-history` 로 다시 채운다 — 안 그러면 데모 당일 Q8 이
+재사용 경로로 빠져 시나리오 B 가 통째로 사라진다.
+
+### 7.2 미해결 — 🟢 표본이 30건에 못 미친다
+
+`--reset --with-history` 실행 결과: 질문 58건 · 발행 42건 · **🟢 16건** (🟡 26 · 🔴 16).
+D25 기준 30건에 미달해 시드가 **종료 코드 1**로 끝났다(데이터는 남아 있다).
+`grade_accuracy` 는 전 등급 `sufficient: false` 로 뜬다.
+
+실측 🟢 발생률이 **27.6%** 라 30건을 채우려면 질문이 **110건쯤** 필요한데,
+`08 §5` 는 이력을 **45~60건**으로 못박고 `test_history_size_and_green_weighting` 이 강제한다.
+**질문셋을 늘리는 것만으로는 상한 안에서 닫히지 않는다** — 다음 셋 중 하나를 정해야 한다:
+
+1. `08 §5` 의 45~60 상한을 올린다 (테스트도 함께)
+2. `accuracy_service.MIN_SAMPLE`(D25 의 30) 을 낮춘다
+3. 🟢 지표 화면을 "표본 부족" 상태로 두고 발표한다
+
+`auto_answer_rate` 는 **0.719 (목표 0.7)** 로 이미 목표를 넘겼고 `saved_wait_hours` 도
+1104시간으로 뜬다 — 비는 것은 `grade_accuracy` 한 칸이다.

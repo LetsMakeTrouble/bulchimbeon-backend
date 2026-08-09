@@ -17,12 +17,16 @@ uv run python scripts/seed.py --reset --with-history   # + 질문 123건 이력�
 > 가 되므로 등급 분포도 `grade_accuracy` 도 만들어지지 않는다. 그래서 fake 로 돌릴 때는
 > 경고를 찍고 진행한다 — 스크립트 자체를 무료로 점검할 때만 쓴다.
 >
-> 실 LLM 비용 가늠: 123건 × 3~4회 ≈ **400 호출** · 25~30분. 여기에 라이브 경로 보호
-> 어서션이 쓰는 **+5회**(Q2·Q7·Q8·Q10 번역 4 + 임베딩 1)가 붙는다 — 그 5회는 파이프라인
-> 밖이라 `quota.py` 집계에 잡히지 않는다.
+> 실 LLM 비용 실측(2026-08-09, `03 §4.2`): 이력 123건이 **370 호출**이고 질문당 평균
+> 2.94회다(🟢🟡 3회 · 🔴 2~4회). 재질문 6건이 **+12**, 라이브 경로 보호 어서션이 **+5**
+> (Q2·Q7·Q8·Q10 번역 4 + 임베딩 1) 붙는다. 그 5회는 파이프라인 밖이라 `quota.py` 집계에
+> 잡히지 않는다. 시간은 25~30분, API 비용은 약 **$1.3** 이다.
 > ⛔ **시드도 `daily_llm_call_limit`(500)의 적용을 받는다** — 파이프라인을 인프로세스로
-> 부르므로 카운터가 이 프로세스에 쌓인다. 400/500 = **80% 소진**이라 질문을 150건 근처로
-> 늘리면 뒷부분이 조용히 강제 🔴 `quota_exceeded` 가 된다. 늘릴 때는 한도도 함께 올려라.
+> 부르므로 카운터가 이 프로세스에 쌓인다. **382/500 = 76% 소진**이고 여유는 118회 ≈
+> **질문 39건**이다. 이력을 165건 근처로 늘리면 뒷부분이 조용히 강제 🔴 `quota_exceeded`
+> 가 된다 — 늘릴 때는 한도도 함께 올려라.
+> ⚠️ 시드는 API 서버와 **다른 프로세스**라 서버 쪽 카운터는 그대로 500 이 남는다.
+> 발표 중 라이브 질문이 한도에 걸릴 걱정은 없다.
 > **발표 당일 재실행은 피하고 전날 채워 둔다.**
 
 > ### 멱등성 (`--reset`, D19)
@@ -61,6 +65,7 @@ from app.models.notification import Notification  # noqa: E402
 from app.models.official_qa import OfficialQA  # noqa: E402
 from app.models.project import Guideline, Project, ProjectMember  # noqa: E402
 from app.models.question import (  # noqa: E402
+    ANSWER_SOURCE_REUSED,
     ANSWER_STATE_DRAFT,
     GRADE_GREEN,
     GRADE_RED,
@@ -137,11 +142,11 @@ SEED_DOCUMENTS: tuple[tuple[str, str], ...] = (
     ("meeting-notes-2026-07.md", "Partner Sync Notes — July 2026"),
 )
 
-# `08 §2` — `##` 섹션 하나가 청크 하나다 (10 + 5 + 5 + 2).
+# `08 §2` — `##` 섹션 하나가 청크 하나다 (11 + 5 + 5 + 2).
 #
 # ⚠️ 어서션으로 두는 이유: 청크 수가 `retrieval_top_k`(6)보다 적으면 검색이 "전부 반환"으로
 #    퇴화하고, 그래도 파이프라인은 초록으로 돈다 — **조용히 깨지는 실패 모드**다 (`08 §5`).
-EXPECTED_CHUNK_COUNT = 22
+EXPECTED_CHUNK_COUNT = 23
 
 # D25 — 등급별 표본이 이 값 미만이면 `grade_accuracy` 가 "표본 부족"으로 뜬다.
 # 🟢 하나라도 숫자를 띄우려면 🟢 발행이 이만큼은 나와야 한다 (`08 §5`).
@@ -157,6 +162,9 @@ FEEDBACK_EVERY = 10  # 10건 중 7건에 "맞았다"
 FEEDBACK_TAKE = 7
 APPROVE_EVERY = 5  # 5건 중 2건에 담당자 승인
 APPROVE_TAKE = 2
+# 확정된 공식 Q&A 를 다시 묻는 질문 수. 이력에 ② 재사용 경로를 남기는 유일한 자리다
+# (`run_reuse_followups` 독스트링 — 순서 때문에 본 이력에서는 재사용이 성립하지 않는다).
+REUSE_FOLLOWUP_COUNT = 6
 
 # 🔴 카드 확정 비율 — 담당자가 인박스를 절반쯤 처리한 상태를 만든다.
 RED_RESOLVE_EVERY = 2
@@ -568,6 +576,64 @@ async def resolve_red_cards(
     return resolved
 
 
+async def run_reuse_followups(
+    db: AsyncSession, project: Project, askers: list[User], guarded_texts: set[str]
+) -> int:
+    """확정된 공식 Q&A 를 **다시 묻는** 질문을 태워 ② 재사용 경로를 이력에 남긴다.
+
+    ⚠️ 이 함수가 없으면 이력에 재사용이 **0건**이 된다. 이유는 버그가 아니라 순서다 —
+    `run_history` 가 질문 전체를 먼저 돌리고 `inject_approvals` 가 그 뒤에 공식 Q&A 를
+    만들기 때문에, 질문들이 돌던 시점에는 재사용할 지식이 아직 없었다. 지식이 쌓여
+    재활용된다는 것이 이 제품의 요지인데 이력 화면과 지표에서 그게 안 보였다.
+
+    ⛔ **라이브 시연이 던질 질문과 겹치는 공식 Q&A 는 건드리지 않는다.** 원문을 다시 물어
+    또 하나의 재사용 이력을 만들면 문제가 없지만, 그 대상이 Q8·Q10 계열이면 발표 당일
+    시나리오 B 가 통째로 사라진다 (`09 §2`). `guarded_texts` 가 그 방어선이다.
+
+    질문자는 **원 질문자와 다른 사람**으로 고른다 — "다른 사람이 같은 걸 또 물었다"가
+    재사용이 성립하는 실제 상황이고, 같은 사람이 같은 질문을 두 번 하는 그림은 어색하다.
+    """
+    official = (
+        await db.scalars(
+            select(OfficialQA)
+            .where(OfficialQA.project_id == project.id)
+            .order_by(OfficialQA.created_at)
+        )
+    ).all()
+
+    targets = [qa for qa in official if qa.question_ko not in guarded_texts][:REUSE_FOLLOWUP_COUNT]
+    reused = 0
+
+    for index, qa in enumerate(targets):
+        asker = askers[(index + 1) % len(askers)]
+        question = await question_service.create_question(
+            db,
+            project_id=project.id,
+            asker=asker,
+            payload=QuestionCreate(content_ko=qa.question_ko, urgency="normal"),
+        )
+        question_id = question.id
+        await db.commit()
+
+        await answer_pipeline.run_answer_pipeline(question_id)
+
+        row = (
+            await db.execute(
+                select(Answer.source, Answer.state)
+                .join(Question, Question.id == Answer.question_id)
+                .where(Question.id == question_id)
+            )
+        ).first()
+        await db.commit()
+
+        if row is not None and row.source == ANSWER_SOURCE_REUSED:
+            reused += 1
+        log(f"  [{index + 1}/{len(targets)}] 재질문 → source={row.source if row else 'none'}")
+
+    log(f"· 재질문 {len(targets)}건 중 재사용 {reused}건")
+    return reused
+
+
 async def assert_live_questions_not_reusable(db: AsyncSession, project: Project) -> None:
     """`09 §2` 승인 주입 어서션 — 명시적 제외 목록의 **추가 안전망**.
 
@@ -700,6 +766,13 @@ async def main(argv: list[str] | None = None) -> int:
         await inject_feedback(db, asked, askers)
         await inject_approvals(db, project, asked, answerer)
         await resolve_red_cards(db, project, asked, answerer)
+
+        log("")
+        log("── 재질문(② 재사용 경로) ──────────────────────────────")
+        # 라이브 시연이 쓰는 계열은 원문째로 제외한다 — 여기서 공식 Q&A 를 소비하면
+        # 발표 당일 시나리오가 재사용으로 빠진다 (`run_reuse_followups` 독스트링).
+        guarded_texts = {BY_KEY[key].content_ko for key in NO_RED_RESOLVE_KEYS}
+        await run_reuse_followups(db, project, askers, guarded_texts)
 
         log("")
         log("── 라이브 시연 경로 보호 확인 (`09 §2`) ────────────────")

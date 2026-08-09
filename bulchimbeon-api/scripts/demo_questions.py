@@ -65,7 +65,10 @@ CANONICAL: tuple[DemoQuestion, ...] = (
         content_ko="주문 조회 API 응답에 user_id 포함되나요?",
         expected_grades=(GRADE_GREEN,),
         evidence_doc=API_SPEC,
-        evidence_heading=(_API_SPEC_ROOT, "GET /v2/orders/{order_id}"),
+        evidence_heading=(
+            _API_SPEC_ROOT,
+            "Order Lookup Response Fields — GET /v2/orders/{order_id}",
+        ),
         note="데모 1단계. 승인 금지 — 재사용 경로로 빠지면 인용이 사라진다.",
     ),
     DemoQuestion(
@@ -81,7 +84,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
         content_ko="지원하는 통화가 뭐예요?",
         expected_grades=(GRADE_GREEN,),
         evidence_doc=API_SPEC,
-        evidence_heading=(_API_SPEC_ROOT, "Currencies"),
+        evidence_heading=(_API_SPEC_ROOT, "Supported Currencies"),
         note="M-1 캘리브레이션이 추가한 섹션. 실측 S=56 이라 실 LLM 에서는 🟡 로 떨어질 수 있다.",
     ),
     DemoQuestion(
@@ -89,7 +92,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
         content_ko="목록 조회 페이지네이션 방식 알려주세요",
         expected_grades=(GRADE_GREEN,),
         evidence_doc=API_SPEC,
-        evidence_heading=(_API_SPEC_ROOT, "Pagination"),
+        evidence_heading=(_API_SPEC_ROOT, "Pagination for List Endpoints"),
         note="cursor 기반, limit 최대 100. M-1 실측 S=90.",
     ),
     DemoQuestion(
@@ -172,7 +175,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
         content_ko="멱등키는 얼마나 유지되나요?",
         expected_grades=(GRADE_GREEN,),
         evidence_doc=API_SPEC,
-        evidence_heading=(_API_SPEC_ROOT, "Idempotency"),
+        evidence_heading=(_API_SPEC_ROOT, "Idempotency and Key Retention"),
         note="24시간, 같은 키·다른 body 는 409. M-1 실측 S=66.",
     ),
     DemoQuestion(

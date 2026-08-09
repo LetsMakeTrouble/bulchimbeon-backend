@@ -5,7 +5,7 @@
 > 스크립트는 초록으로 끝난다. 그리고 그 사실은 **발표 당일 화면에서** 드러난다.
 > 여기서 보는 것은 셋이다:
 >
-> 1. `seed/*.md` 4개가 업로드·인제스트를 거쳐 정확히 22청크가 되는가 (`08 §2`)
+> 1. `seed/*.md` 4개가 업로드·인제스트를 거쳐 정확히 23청크가 되는가 (`08 §2`)
 > 2. 승인 주입이 `NO_APPROVAL_KEYS` 계열을 **계열 통째로** 건너뛰는가 (`09 §2`)
 > 3. 그 제외가 뚫렸을 때 `assert_live_questions_not_reusable` 이 **실제로 잡는가**
 >
@@ -131,10 +131,10 @@ def test_reset_covers_every_project_scoped_table() -> None:
 # --- 업로드·인제스트 (`08 §5` 2번) ---------------------------------------------------------
 
 
-async def test_seed_documents_ingest_to_22_chunks(
+async def test_seed_documents_ingest_to_23_chunks(
     db_session: AsyncSession, team: Team, project: Project
 ) -> None:
-    """`seed/*.md` 4개가 **운영과 같은 업로드 경로**로 들어가 22청크가 된다.
+    """`seed/*.md` 4개가 **운영과 같은 업로드 경로**로 들어가 23청크가 된다.
 
     `tests/demo_corpus.py` 는 청커만 부르지만 여기는 `create_document` → `run_ingest` 를
     그대로 태운다 — 파싱·청킹·임베딩·활성 전환까지 붙어야 검색 대상이 되기 때문이다.

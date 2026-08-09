@@ -14,7 +14,7 @@
 | 키 | 값 | 비고 |
 | --- | --- | --- |
 | `green_threshold` / `yellow_threshold` / `grounding_min` | 80 / 50 / 60 | 리스케일이 스케일 차이를 흡수하므로 모델이 바뀌어도 유지 |
-| `retrieval_top_k` | **6** | 8에서 하향. 확장된 시드가 22청크이므로 top-k가 코퍼스보다 커지는 no-op이 발생하지 않는다 |
+| `retrieval_top_k` | **6** | 8에서 하향. 확장된 시드가 23청크이므로 top-k가 코퍼스보다 커지는 no-op이 발생하지 않는다 |
 | `s_floor` / `s_ceil` | **0.25 / 0.679** | M-1 게이트 실측 확정 (2026-08-07) |
 | `similarity_floor` | **0.444** | top-1 `sim_raw`가 이 값 미만이면 강제 🔴 `no_evidence`. M-1 은 0.423 이었으나 Q8 이 그 분포 안쪽이라 2026-08-09 에 상향했다 (`03 §4.1.3`) |
 | `briefing_hour` / `dnd_start` / `dnd_end` | 9 / 22:00 / 07:00 | ⏰ **담당자 Mike의 `users.timezone`(America/New_York) 기준**으로 판정된다. `settings`에 별도 타임존 키는 없다 |
@@ -28,28 +28,32 @@
 ## 2. 시드 문서 (영어, `seed/` 폴더에 파일로 생성)
 
 > 청킹은 마크다운 헤딩 경로 우선 분할이므로 `##` 섹션 하나가 청크 하나가 된다.
-> **총 22청크** — `retrieval_top_k`(6)보다 충분히 크므로 검색이 "전부 반환"으로 퇴화하지 않는다.
+> **총 23청크** — `retrieval_top_k`(6)보다 충분히 크므로 검색이 "전부 반환"으로 퇴화하지 않는다.
 
-### seed/api-spec.md — "Orders API Specification v2.1" (10청크)
+### seed/api-spec.md — "Orders API Specification v2.1" (11청크)
 ```markdown
 # Orders API Specification v2.1
 
-## GET /v2/orders/{order_id}
-Returns a single order. Response fields:
+## Order Lookup Response Fields — GET /v2/orders/{order_id}
+Looking up a single order returns the fields below. The order lookup response always
+includes `user_id`. Response fields:
 - `order_id` (string): unique order identifier
 - `user_id` (string): the purchaser's account id. Included in all responses since v2.0.
 - `status` (string): one of `pending`, `paid`, `shipped`, `delivered`, `cancelled`
 - `currency` (string): ISO 4217. KRW, USD, and JPY are supported.
 - `total_amount` (integer): amount in the smallest currency unit
 
-## Currencies
-The API supports three settlement currencies: KRW, USD, and JPY, identified by their ISO 4217
-codes. An order's currency is fixed when the order is created and cannot be changed afterwards.
-Amounts are always expressed in the smallest unit of the currency — KRW and JPY have no minor
-unit, so `total_amount` is a whole won or yen figure, while USD amounts are in cents. A project
-may be configured to accept more than one currency, but every individual order carries exactly
-one. Currency conversion is not performed by the platform; the buyer is charged in the currency
-recorded on the order.
+## Supported Currencies
+The supported currencies are KRW, USD, and JPY. Those three settlement currencies are the
+only currencies the API supports, and they are identified by their ISO 4217 codes.
+
+## Currency Rules
+A project may be configured to accept more than one of the supported currencies, but every
+individual order carries exactly one. An order's currency is fixed when the order is created
+and cannot be changed afterwards. Amounts are always expressed in the smallest unit of the
+currency — KRW and JPY have no minor unit, so `total_amount` is a whole won or yen figure,
+while USD amounts are in cents. Currency conversion is not performed by the platform; the
+buyer is charged in the currency recorded on the order.
 
 ## Authentication
 All endpoints require a Bearer token issued by the Auth service.
@@ -60,8 +64,13 @@ clients must re-authenticate after expiry.
 API calls are limited to 60 requests per minute per API key.
 Exceeding the limit returns HTTP 429 with a `Retry-After` header.
 
-## Pagination
-List endpoints use cursor-based pagination with `cursor` and `limit` (max 100).
+## Pagination for List Endpoints
+The pagination method for list endpoints is cursor-based paging. Paging through a list
+uses two query parameters, `cursor` and `limit`. The `limit` parameter sets the page size
+and may not exceed 100; when it is omitted the page size defaults to 20. Each list
+response carries a `next_cursor` value, and the client pages through the list by sending
+that value back as `cursor` on the next request. A response whose `next_cursor` is null
+is the last page. Offset-based paging is not supported in v2.1.
 
 ## Webhooks
 Webhook endpoints are registered per project in the developer console. The platform
@@ -83,9 +92,10 @@ when contacting support. Clients should retry only on `429` and `5xx`, and must 
 retry a `4xx` other than `429`. Error codes are additive — new codes may appear without a
 version bump, so treat an unknown code as `internal_error`.
 
-## Idempotency
-Write endpoints accept an optional `Idempotency-Key` header containing a client-generated
-UUID. When a key is supplied, the platform stores the first response for that key and
+## Idempotency and Key Retention
+An idempotency key is retained for 24 hours, and that retention window is how long the
+key stays valid. Write endpoints accept an optional `Idempotency-Key` header containing a
+client-generated UUID. When a key is supplied, the platform stores the first response for that key and
 replays it for any repeated request carrying the same key and the same request body,
 returning the original status code and body. Keys are scoped to the API key that created
 them and are retained for 24 hours; after that window a repeated request is treated as
@@ -227,10 +237,10 @@ reported by email within one hour.
 
 | # | 질문 (ko) | 기대 결과 | 근거 |
 | --- | --- | --- | --- |
-| Q1 | 주문 조회 API 응답에 user_id 포함되나요? | 🟢 | api-spec `GET /v2/orders/{order_id}` |
+| Q1 | 주문 조회 API 응답에 user_id 포함되나요? | 🟢 | api-spec `Order Lookup Response Fields — GET /v2/orders/{order_id}` |
 | Q2 | 액세스 토큰 만료 시간이 어떻게 되나요? | 🟢 | api-spec `Authentication` — 24시간 + 재인증 |
-| Q3 | 지원하는 통화가 뭐예요? | 🟢 | api-spec `Currencies` — KRW/USD/JPY |
-| Q4 | 목록 조회 페이지네이션 방식 알려주세요 | 🟢 | api-spec `Pagination` — cursor 기반, max 100 |
+| Q3 | 지원하는 통화가 뭐예요? | 🟢 | api-spec `Supported Currencies` — KRW/USD/JPY |
+| Q4 | 목록 조회 페이지네이션 방식 알려주세요 | 🟢 | api-spec `Pagination for List Endpoints` — cursor 기반, max 100 |
 | Q5 | 웹훅 재시도 정책이 있나요? | 🟢~🟡 | meeting-notes `API and Rate Limits`만 근거 (단일 출처) |
 | Q6 | 배송비도 환불되나요? | 🟢 | refund-policy `Shipping Fees` — 불량품 제외 환불 불가 |
 | Q7 | API 요청 제한이 분당 몇 회인가요? | **🔴 (conflict)** | 60/min(api-spec) vs 100/min(meeting-notes) — 동일 대상·동일 확정성의 진짜 모순 |
@@ -238,7 +248,7 @@ reported by email within one hour.
 | Q9 | 결제 게이트웨이는 어떤 PG사를 쓰나요? | **🔴 (`no_evidence` 또는 `low_confidence`)** | 문서에 PG사 이름 없음. 미끼 청크가 검색은 되므로 `no_evidence`가 아니라 매칭률 미달로 떨어질 수 있다 — **둘 다 정답** |
 | Q10 | (Q8 담당자 수정·확정 후) **일본 리전 환불 정책도 동일하게 적용되나요?** | 🟢 reused | 공식 Q&A 재사용. Q8과 **어휘를 근접**시켜 원시 코사인이 `reuse_threshold`를 넘게 한다 |
 | Q11 | 웹훅 서명은 어떻게 검증하나요? | 🟢 | integration-guide `Webhook Signature Verification` — HMAC-SHA256, 5분 윈도우 |
-| Q12 | 멱등키는 얼마나 유지되나요? | 🟢 | api-spec `Idempotency` — 24시간, 같은 키·다른 body는 409 |
+| Q12 | 멱등키는 얼마나 유지되나요? | 🟢 | api-spec `Idempotency and Key Retention` — 24시간, 같은 키·다른 body는 409 |
 | Q13 | 샌드박스에서 실제 결제가 발생하나요? | 🟢 | api-spec `Sandbox` — 실제 결제 없음, 테스트 카드만, 매주 일요일 리셋 |
 
 - Q11~Q13은 **확장된 시드 섹션을 근거로 하는 🟢 케이스**다. 검색이 6청크만 뽑는 상황에서 정답 청크가 실제로 top-k에 들어오는지 검증한다.
@@ -256,11 +266,33 @@ reported by email within one hour.
 > | 대조 제외 | Q10 37 | — | 재사용 경로(원시 코사인 0.9551 ≥ `reuse_threshold`) |
 >
 > **불일치 3건의 원인 — 검색 실패가 아니다.** Q1·Q3·Q12는 정답 청크를 정확히 top-1으로 잡았다
-> (`GET /v2/orders/{order_id}` · `Currencies` · `Idempotency`). 원시 유사도가 중간대(0.4891~0.5342)일 뿐이다.
+> (`Order Lookup Response Fields` · `Supported Currencies` · `Idempotency and Key Retention`). 원시 유사도가 중간대(0.4891~0.5342)일 뿐이다.
 > **임계값으로는 올릴 수 없다**: 이 셋을 🟢에 넣으려면 `s_ceil`을 0.58 이하로 낮춰야 하는데,
 > 그러면 Q2·Q4·Q11·Q13이 전부 100으로 포화되어 80/50 3분기가 무의미해진다(리스케일은 단조).
 > **따라서 기대값을 바꾸지 않고, 최종 등급은 `min(S, G)`이므로 M3 실LLM 스모크에서 G와 함께 재확인한다.**
 > G가 높으면 매칭률은 S에 막혀 🟡이 되고, 이는 "근거는 찾았으나 확신이 중간"이라는 제품 의미상 정직한 결과다.
+>
+> #### 후속 (2026-08-09) — 임계값이 아니라 **문서**를 고쳐서 해결했다
+> 위 판단은 "임계값을 건드리지 않는다"는 전제에서는 옳았지만, 셋째 선택지를 놓치고 있었다.
+> **근거 섹션 자체가 얇았다.** `Pagination`은 한 줄짜리였고, `Currencies`는 답이 환전·최소단위
+> 설명에 묻혀 있었으며, 주문 조회 섹션의 제목(`GET /v2/orders/{order_id}`)에는 사람이 쓰는
+> 말이 하나도 없었다. 제목도 임베딩 입력에 들어가므로(`06 §2` ③) 제목은 큰 지렛대다.
+>
+> 섹션을 보강·분할하고 제목에 자연어를 넣은 뒤 실측한 S (배포 DB, 실 LLM):
+>
+> | 질문 | 이전 S | 이후 S |
+> | --- | --- | --- |
+> | Q1 주문 조회 응답 `user_id` | 69 | **100** |
+> | Q3 지원 통화 | 59 | **94** |
+> | Q4 페이지네이션 | 51 | **98** |
+> | Q12 멱등키 유지 기간 | 70 | **100** |
+> | Q8 · Q9 · Q10 (🔴 유지 대상) | 차단선 아래 | **차단선 아래 유지** (0.399~0.414) |
+>
+> Q11(웹훅 서명)은 S가 아니라 G가 문제였고 `09 §7.5`의 ⑤ 절단 버그를 고쳐 🟢 94가 됐다.
+> **결과적으로 `08 §3` 기대표와 어긋나던 5건이 전부 해소됐다** — 임계값은 하나도 건드리지 않았다.
+> ⚠️ 문서를 질문 어휘에 맞춰 다듬는 것은 검색 성능을 올리는 정당한 수단이지만 동시에
+> 데모 질문에 과적합될 여지도 있다. 여기서 한 것은 **원래 부실했던 섹션을 채운 것**까지이고,
+> 차단선 아래여야 하는 Q8·Q9·Q10이 그대로 남았다는 점이 과적합이 아니라는 증거다.
 - ⚠️ **Q10의 주 방어선은 문안이 아니라 LLM 동일성 게이트다.** 어휘 근접은 원시 코사인을 `reuse_threshold` 위로 올리는 **보조 수단**일 뿐이고, "정말 같은 질문인가"의 최종 판정은 ②의 2차 게이트(yes/no)가 한다(`06 §2`). 게이트가 `no`를 내면 재사용 대신 새 답변이 생성되고 `answer.reuse_missed` 이벤트가 남는다.
 - **Q7·Q8의 기대값은 시연 시각과 무관**하다(§1의 DND 규칙 — 강제 🔴 4종은 DND에서도 🔴 유지). ⚠️ **Q9는 예외다**: `no_evidence`로 잡히면 시각과 무관하지만, `low_confidence`로 떨어지고 발행 가능한 문장이 남으면 담당자 DND 시간대에 🟡로 강등된다(`02` 룰 6 · `06 §2` ⑥). 따라서 Q9만 시각 의존적일 수 있다.
 
@@ -290,7 +322,7 @@ reported by email within one hour.
 ## 5. seed.py 요구사항
 
 1. 유저 3명 → 프로젝트 생성(마이크=담당자) → 지수·민준 asker 참여
-2. guidelines 등록 → `seed/*.md` **4개 문서**(api-spec / refund-policy / integration-guide / meeting-notes) 업로드 → 인제스트 완료 대기(ready). **총 22청크 생성 확인**을 어서션으로 둔다 — 청크 수가 `retrieval_top_k`보다 적으면 검색이 no-op가 되므로 조용히 깨지는 실패 모드다.
+2. guidelines 등록 → `seed/*.md` **4개 문서**(api-spec / refund-policy / integration-guide / meeting-notes) 업로드 → 인제스트 완료 대기(ready). **총 23청크 생성 확인**을 어서션으로 둔다 — 청크 수가 `retrieval_top_k`보다 적으면 검색이 no-op가 되므로 조용히 깨지는 실패 모드다.
 3. `--with-history` 옵션: **질문 120~125건** (현재 123건)(**🟢 기대 질문만 35건 이상**)을 실제 파이프라인으로 실행해 이력·지표를 채운 상태로 시작 (발표 직전용)
    - 구성: Q1~Q6 + Q11~Q13(총 9종)과 그 **패러프레이즈 변형**을 섞는다. 🟢 위주로 하되 Q7·Q8·Q9 계열도 몇 건 섞어 등급 분포를 만든다. Q7·Q8·Q9 계열은 등급 분포 확인용 8~10건에 그친다.
 

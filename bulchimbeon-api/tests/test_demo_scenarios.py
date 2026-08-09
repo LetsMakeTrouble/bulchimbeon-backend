@@ -107,10 +107,10 @@ def _green(key: str, heading: tuple[str, ...]) -> Case:
 
 
 CASES: tuple[Case, ...] = (
-    _green("Q1", (API_SPEC, "GET /v2/orders/{order_id}")),
+    _green("Q1", (API_SPEC, "Order Lookup Response Fields — GET /v2/orders/{order_id}")),
     _green("Q2", (API_SPEC, "Authentication")),
-    _green("Q3", (API_SPEC, "Currencies")),
-    _green("Q4", (API_SPEC, "Pagination")),
+    _green("Q3", (API_SPEC, "Supported Currencies")),
+    _green("Q4", (API_SPEC, "Pagination for List Endpoints")),
     _green("Q5", (NOTES, "API and Rate Limits")),
     _green("Q6", (REFUND, "Shipping Fees")),
     Case(
@@ -150,7 +150,7 @@ CASES: tuple[Case, ...] = (
         note="일반 상식 폴백 금지(룰 6)의 미끼 케이스. `09 §3` 대로 🔴 을 고정했다.",
     ),
     _green("Q11", (GUIDE, "Webhook Signature Verification")),
-    _green("Q12", (API_SPEC, "Idempotency")),
+    _green("Q12", (API_SPEC, "Idempotency and Key Retention")),
     _green("Q13", (API_SPEC, "Sandbox")),
 )
 
@@ -160,8 +160,8 @@ async def team(client: AsyncClient) -> Team:
     return await build_team(client, "demo-scenarios.test")
 
 
-def test_seed_corpus_is_22_chunks() -> None:
-    """`08 §2` — `##` 섹션 하나가 청크 하나 (10 + 5 + 5 + 2).
+def test_seed_corpus_is_23_chunks() -> None:
+    """`08 §2` — `##` 섹션 하나가 청크 하나 (11 + 5 + 5 + 2).
 
     청크 수가 `retrieval_top_k`(6)보다 적으면 검색이 "전부 반환"으로 퇴화하는데도 파이프라인은
     초록으로 돈다 — 조용히 깨지는 실패 모드라 여기서 못박는다 (`08 §5`).
@@ -171,7 +171,7 @@ def test_seed_corpus_is_22_chunks() -> None:
     assert len(corpus) == EXPECTED_CHUNK_COUNT
 
     assert Counter(chunk.doc_filename for chunk in corpus) == {
-        "api-spec.md": 10,
+        "api-spec.md": 11,
         "refund-policy.md": 5,
         "integration-guide.md": 5,
         "meeting-notes-2026-07.md": 2,

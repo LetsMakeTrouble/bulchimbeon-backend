@@ -20,6 +20,7 @@ from app.services.event_service import EVENT_DOCUMENT_VERSION_ACTIVATED
 from app.services.pipeline.ingest import _GENERIC_INGEST_ERROR
 from app.services.pipeline.retrieval import searchable_chunk_ids
 from tests.documents_helpers import (
+    EMBED_FAILURE_TRIGGER,
     MARKDOWN_SAMPLE,
     SAMPLES,
     fetch_document,
@@ -244,7 +245,7 @@ async def test_ingest_failure_marks_version_failed_without_leaking_internals(
     """
     owner, project = await _answerer_project(client, "ingestfail")
 
-    fake_llm_provider.embed_failure = "Refund Policy"
+    fake_llm_provider.embed_failure = EMBED_FAILURE_TRIGGER
     try:
         created = await upload_document(client, owner, project["id"], extension=".md")
     finally:
@@ -377,7 +378,7 @@ async def test_failed_new_version_does_not_take_down_the_previous_evidence(
     assert evidence_before, "첫 버전이 근거로 잡혀 있어야 한다"
 
     # 두 번째 버전은 인제스트가 실패한다.
-    fake_llm_provider.embed_failure = "Refund Policy"
+    fake_llm_provider.embed_failure = EMBED_FAILURE_TRIGGER
     try:
         updated = await upload_version(client, owner, document["id"], extension=".md")
     finally:
@@ -403,7 +404,7 @@ async def test_activating_a_version_that_is_not_ready_is_rejected(
     owner, project = await _answerer_project(client, "activatenotready")
     document = await upload_document(client, owner, project["id"], extension=".md")
 
-    fake_llm_provider.embed_failure = "Refund Policy"
+    fake_llm_provider.embed_failure = EMBED_FAILURE_TRIGGER
     try:
         updated = await upload_version(client, owner, document["id"], extension=".md")
     finally:

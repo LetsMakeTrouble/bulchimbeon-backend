@@ -30,9 +30,27 @@ class ChunkDraft:
     content: str
     heading_path: list[str] = field(default_factory=list)
     page_no: int | None = None
+    # ⚠️ **임베딩 대상은 `content` 가 아니라 이 값이다** — 헤딩 줄을 뺀 본문.
+    # 이유는 `embedding_content` 아래 주석과 `docs/09-deploy-notes.md` 참조.
+    # 기본값은 `content` 에서 헤딩 줄을 걷어낸 것이다(직접 만든 드래프트도 안전하게 동작).
+    embedding_content: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.embedding_content is None:
+            self.embedding_content = strip_heading_lines(self.content) or self.content
 
     def to_meta(self) -> dict[str, object]:
         return {"heading_path": list(self.heading_path), "page_no": self.page_no}
+
+
+def strip_heading_lines(text: str) -> str:
+    """헤딩 줄을 걷어낸 본문. 임베딩 입력에만 쓴다.
+
+    ⚠️ **`content` 에서는 절대 빼지 않는다** (`06 §2` ④ EVIDENCE 포맷이 요구한다).
+    빼는 곳은 임베딩 입력 하나뿐이다.
+    """
+    lines = [line for line in text.splitlines() if not _HEADING_PATTERN.match(line)]
+    return "\n".join(lines).strip()
 
 
 def estimate_tokens(text: str) -> int:
@@ -51,11 +69,49 @@ def chunk_pages(pages: list[ParsedPage]) -> list[ChunkDraft]:
 
     for page in pages:
         for section_text, heading_path in _split_by_headings(page.text, heading_stack):
+            # ⚠️ `content` 는 **종전 그대로** 둔다 (헤딩 줄 포함, 오버랩 경계도 그대로).
+            #    달라지는 것은 `embedding_content` 하나뿐이다.
+            heading_line = _leading_heading(section_text)
             for body in _split_with_overlap(section_text):
                 chunks.append(
-                    ChunkDraft(content=body, heading_path=list(heading_path), page_no=page.page_no)
+                    ChunkDraft(
+                        content=body,
+                        heading_path=list(heading_path),
+                        page_no=page.page_no,
+                        embedding_content=_embedding_body(body, heading_line),
+                    )
                 )
     return chunks
+
+
+def _leading_heading(section_text: str) -> str:
+    """섹션 첫 줄이 헤딩이면 그 줄, 아니면 빈 문자열."""
+    lines = section_text.splitlines()
+    if lines and _HEADING_PATTERN.match(lines[0]):
+        return lines[0]
+    return ""
+
+
+def _embedding_body(body: str, heading_line: str) -> str:
+    """임베딩 입력 — 헤딩 줄을 걷어낸 본문.
+
+    보통은 줄 단위로 걷어내면 끝이다. 다만 `_split_with_overlap` 은 800토큰 초과 섹션을
+    **공백으로 이어 붙여** 나누므로 줄바꿈이 사라진다. 그 경우 창 전체가 헤딩 한 줄처럼
+    보여 줄 단위 제거가 본문을 통째로 지워 버리므로, 알려진 헤딩 문자열을 접두사로만 뗀다.
+    """
+    stripped = strip_heading_lines(body)
+    if stripped:
+        return stripped
+
+    if heading_line:
+        normalized = " ".join(heading_line.split())
+        if body.startswith(normalized):
+            remainder = body[len(normalized) :].strip()
+            if remainder:
+                return remainder
+
+    # 걷어낼 게 없거나 걷어내면 빈 문자열이 되는 경우 — 원문을 그대로 임베딩한다.
+    return body
 
 
 def _has_prose(body: str) -> bool:

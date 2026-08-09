@@ -36,6 +36,14 @@ International shipping takes fifteen business days.
 
 PDF_SENTENCE = "Refunds are accepted within 30 days of purchase."
 
+# `fake_llm_provider.embed_failure` 트리거 — **임베딩 입력에 실제로 들어가는** 문자열이어야 한다.
+#
+# ⚠️ 헤딩 줄(`# Refund Policy`)을 쓰면 안 된다. 인제스트는 헤딩을 뺀 본문을 임베딩하므로
+#    (`pipeline/ingest.py` — M-1 캘리브레이션과 조건을 맞추기 위한 것) 헤딩 문자열로는
+#    트리거가 걸리지 않는다. 그러면 **실패를 기대한 테스트가 조용히 초록으로 통과한다.**
+#    `MARKDOWN_SAMPLE` 의 H1 섹션 본문에서 고른다.
+EMBED_FAILURE_TRIGGER = "partner success team"
+
 
 def build_pdf(sentence: str = PDF_SENTENCE) -> bytes:
     """텍스트 한 줄이 들어 있는 최소 PDF 를 만든다 (pypdf 로 추출 가능)."""

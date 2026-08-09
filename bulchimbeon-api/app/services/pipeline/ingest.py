@@ -158,7 +158,13 @@ async def _ingest(
             "(스캔 PDF 이거나, 내용이 비어 있거나, 제목 줄 외에 본문이 없습니다)"
         )
 
-    embeddings = await _embed_all([draft.content for draft in drafts])
+    # ⚠️ **`content` 가 아니라 `embedding_content` 를 임베딩한다** — 헤딩 줄을 뺀 본문이다.
+    # M-1 캘리브레이션(`probe_calibration.py`)이 헤딩 없는 본문으로 임계값 5종을 뽑았는데
+    # 여기서 헤딩까지 임베딩하면 **측정한 것과 다른 것을 운영**하게 된다. 실제로 배포 대조에서
+    # 유사도가 가운데로 몰려(높은 쪽 하락·낮은 쪽 상승) Q8 이 `similarity_floor` 를 0.008 차이로
+    # 넘겨 강제 🔴 이 풀렸다 — 시나리오 B 가 통째로 재현되지 않았다.
+    # 헤딩은 `content` 와 `meta.heading_path` 에 그대로 남으므로 EVIDENCE 표시는 영향이 없다.
+    embeddings = await _embed_all([draft.embedding_content or draft.content for draft in drafts])
 
     # 재인제스트(실패 후 재시도)가 청크를 중복 적재하지 않게 먼저 비운다.
     await db.execute(delete(Chunk).where(Chunk.document_version_id == version.id))

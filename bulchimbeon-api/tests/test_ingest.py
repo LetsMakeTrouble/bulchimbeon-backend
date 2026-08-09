@@ -18,7 +18,12 @@ from app.utils.chunking import (
     estimate_tokens,
 )
 from app.utils.parsing import ParsedPage
-from tests.documents_helpers import latest_version, upload_document, upload_version
+from tests.documents_helpers import (
+    EMBED_FAILURE_TRIGGER,
+    latest_version,
+    upload_document,
+    upload_version,
+)
 from tests.helpers import API, create_actor, create_project
 
 # --- 청킹 (`06 §1` ②) --------------------------------------------------------------------
@@ -149,7 +154,7 @@ async def test_document_ingested_event_is_published_for_ready_and_failed(
     owner = await create_actor(client, f"ssehook-{should_fail}@example.com")
     project = await create_project(client, owner)
 
-    fake_llm_provider.embed_failure = "Refund Policy" if should_fail else None
+    fake_llm_provider.embed_failure = EMBED_FAILURE_TRIGGER if should_fail else None
     try:
         document = await upload_document(client, owner, project["id"], extension=".md")
     finally:
@@ -258,7 +263,7 @@ async def test_failed_version_is_not_searchable(
     owner = await create_actor(client, "scope-failed@example.com")
     project = await create_project(client, owner)
 
-    fake_llm_provider.embed_failure = "Refund Policy"
+    fake_llm_provider.embed_failure = EMBED_FAILURE_TRIGGER
     try:
         await upload_document(client, owner, project["id"], extension=".md")
     finally:

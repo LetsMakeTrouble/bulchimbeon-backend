@@ -15,6 +15,9 @@ COPY app ./app
 COPY alembic ./alembic
 # scripts/ 는 배포 후 `python scripts/seed.py` 실행에 필요하다 (03 §6 5번).
 COPY scripts ./scripts
+# seed/ 도 같은 이유로 필요하다 — seed.py 가 `PROJECT_ROOT/seed/*.md` 4개를 업로드한다
+# (scripts/seed.py:100 SEED_DIR). 빠뜨리면 컨테이너 안에서 시드가 FileNotFoundError 로 죽는다.
+COPY seed ./seed
 COPY alembic.ini README.md ./
 RUN uv sync --frozen --no-dev
 
@@ -32,6 +35,7 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/app /app/app
 COPY --from=builder /app/alembic /app/alembic
 COPY --from=builder /app/scripts /app/scripts
+COPY --from=builder /app/seed /app/seed
 COPY --from=builder /app/alembic.ini /app/alembic.ini
 
 RUN mkdir -p /app/storage && \

@@ -280,15 +280,20 @@ async def test_inject_approvals_skips_excluded_families(
     answerer = await db_session.get(User, as_uuid(team.owner.id))
     assert answerer is not None
 
-    # Q1 은 제외 계열, Q2 는 승인 대상.
+    # ⚠️ 계열 이름을 하드코딩하지 않는다 — `NO_APPROVAL_KEYS` 는 데모 1단계 질문이 바뀌면
+    #    함께 바뀐다(2026-08-09 Q1 → Q2). 상수에서 뽑아야 목록이 바뀌어도 **이 테스트가
+    #    검증하려는 것**(제외 계열은 건너뛴다)이 그대로 유지된다.
+    excluded = sorted(NO_APPROVAL_KEYS & set(BY_KEY))[0]
+    approvable = sorted(set(BY_KEY) - NO_APPROVAL_KEYS - LIVE_ONLY_KEYS)[0]
+
     asked = [
-        await _plant_answered(db_session, team, project, "Q1"),
-        await _plant_answered(db_session, team, project, "Q2"),
+        await _plant_answered(db_session, team, project, excluded),
+        await _plant_answered(db_session, team, project, approvable),
     ]
     await db_session.commit()
 
     approved = await seed.inject_approvals(db_session, project, asked, answerer)
-    assert approved == 1, "제외 계열(Q1)은 건너뛰고 Q2 만 승인해야 한다"
+    assert approved == 1, f"제외 계열({excluded})은 건너뛰고 {approvable} 만 승인해야 한다"
 
     # ⚠️ 컬럼 select 로 읽는다. `db.get()` 은 identity map 에 남은 객체를 돌려주고, 그 위에서
     #    `expire_all()` 뒤 속성에 접근하면 async 에서 `MissingGreenlet` 이 된다.
@@ -301,9 +306,9 @@ async def test_inject_approvals_skips_excluded_families(
             )
         ).all()
     )
-    assert states[asked[0].answer_id] == ANSWER_STATE_DRAFT, "Q1 계열은 확정되지 않는다"
+    assert states[asked[0].answer_id] == ANSWER_STATE_DRAFT, f"{excluded} 계열은 확정되지 않는다"
     assert states[asked[1].answer_id] == ANSWER_STATE_VERIFIED
 
     # 승인은 공식 Q&A 를 만든다 (`06 §3`) — 그래서 제외 목록이 필요한 것이다.
-    # Q1 계열이 섞여 들어갔다면 여기서 어서션이 잡는다.
+    # 제외 계열이 섞여 들어갔다면 여기서 어서션이 잡는다.
     await seed.assert_live_questions_not_reusable(db_session, project)

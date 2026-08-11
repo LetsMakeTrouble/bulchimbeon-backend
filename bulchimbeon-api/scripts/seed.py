@@ -110,7 +110,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SEED_DIR = PROJECT_ROOT / "seed"
 
 # --- 데모 설정 (`08 §1`) -----------------------------------------------------------------
-DEMO_PASSWORD = "demo1234!"
+# ⚠️ 값 자체는 `settings.demo_password` 에 있다 — 공개 인스턴스에서는 `DEMO_PASSWORD`
+# env 로 덮어써야 한다 (`config.py` 주석). 여기서 다시 문자열을 적지 않는다.
+DEMO_PASSWORD = settings.demo_password
 PROJECT_NAME = "GlobalMart JP Launch"
 PROJECT_DESCRIPTION = (
     "한국 커머스팀이 미국 개발 파트너(DevCorp)의 API로 일본 리전 런칭을 준비하는 프로젝트."
@@ -778,7 +780,8 @@ async def main(argv: list[str] | None = None) -> int:
         answerer = await ensure_user(db, ANSWERER)
         askers = [await ensure_user(db, spec) for spec in ASKERS]
         await db.commit()
-        log(f"· 유저 {1 + len(askers)}명 준비 (비밀번호 {DEMO_PASSWORD})")
+        _masked = "기본값(demo1234!)" if DEMO_PASSWORD == "demo1234!" else "env 로 지정된 값"
+        log(f"· 유저 {1 + len(askers)}명 준비 (비밀번호: {_masked})")
 
         project = await build_project(db, answerer, askers)
         await upload_seed_documents(db, project, answerer)

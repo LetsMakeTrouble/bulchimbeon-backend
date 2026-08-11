@@ -5,8 +5,12 @@
 ## 1. 가상 프로젝트 설정
 
 - **프로젝트**: `GlobalMart JP Launch` — 한국 커머스팀이 미국 개발 파트너(DevCorp)의 API로 일본 리전 런칭을 준비하는 상황
-- **담당자**: Mike Chen (`mike@devcorp.example` / 데모 비밀번호 `demo1234!`, language=en, timezone=America/New_York)
-- **질문자**: 지수 (`jisoo@globalmart.example` / `demo1234!`, ko, Asia/Seoul), 민준 (`minjun@globalmart.example` / `demo1234!`, ko)
+- **담당자**: Mike Chen (`mike@devcorp.example`, language=en, timezone=America/New_York)
+- **질문자**: 지수 (`jisoo@globalmart.example`, ko, Asia/Seoul), 민준 (`minjun@globalmart.example`, ko)
+- **비밀번호**: `DEMO_PASSWORD` env 값. 로컬 기본값은 `demo1234!` 이고, **공개 URL 에 붙는
+  인스턴스에서는 반드시 env 로 덮어쓴다** — 저장소가 공개라 기본값을 그대로 두면
+  "공개된 비밀번호 + 공개된 주소"로 담당자 계정에 로그인된다. 담당자는 임계값 변경·문서
+  삭제·지침 교체 권한을 가지므로 데모가 조용히 망가질 수 있다.
 - 응답 지침(guidelines): `Answers must reference the exact API version. If a policy differs by region, always say which regions were checked. Prefer concise answers with field names in backticks.`
 
 **설정값** — 기본값 그대로 두되 아래 세 가지는 시드에서 명시적으로 확인한다.

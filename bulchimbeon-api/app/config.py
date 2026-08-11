@@ -88,6 +88,14 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 14
 
+    # 데모 시드 계정의 비밀번호 (`scripts/seed.py`).
+    #
+    # ⚠️ **기본값은 저장소에 공개돼 있다** — 로컬 개발 편의용이고, 그래서 여기 있어도 된다.
+    # ⛔ 다만 **공개 URL 에 붙은 인스턴스에서는 반드시 env 로 덮어써라.** 안 그러면
+    #    "공개 저장소의 비밀번호 + 공개 주소" 조합으로 담당자 계정에 그대로 로그인된다.
+    #    담당자는 임계값 변경·문서 삭제·지침 교체 권한을 가진다.
+    demo_password: str = "demo1234!"
+
     # DB
     database_url: str = "postgresql+asyncpg://bulchimbeon:bulchimbeon@localhost:5432/bulchimbeon"
     test_database_url: str = (

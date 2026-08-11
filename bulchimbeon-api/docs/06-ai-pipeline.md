@@ -283,6 +283,15 @@ Rules:
 
 ## 6. 비용·지연 가드
 
+- **예약 작업은 전부 상태 파생형이다** (2026-08-11). 만료는 `expires_at < now`, 좀비는
+  `processing` 정체, 브리핑은 `briefing_hour 도달 + 오늘 실행 없음` — 무엇을 할지가 DB
+  상태에서 매번 다시 계산되므로 **다운타임 이후 자동으로 소급된다.** 할 일을 쌓아 두는
+  큐가 필요 없는 이유다. 대신 **한 일**을 `job_runs` 에 남긴다(`04 §6.3`).
+  - 기동 직후 세 잡을 1회씩 돌린다 — `interval` 첫 발화가 "기동 + 주기"라 재배포마다
+    최대 60분 공백이 생겼다.
+  - 브리핑만 `cron`(매 정시)이다. `interval` 이면 기동 시각에 따라 확인 시각이 밀린다.
+  - ⛔ **날짜를 넘긴 다운타임의 브리핑은 보내지 않는다.** 하루 지난 인박스 요약은 정보
+    가치가 없고 `_is_catch_up_inside_dnd` 와 충돌한다. 기록만 남긴다.
 - **일일 호출 상한**: `settings.daily_llm_call_limit`(기본 500) — ⚠️ **env가 아니라 `projects.settings`**다(룰 1의 하드코딩 금지 원칙). 초과 시 질문 접수는 받되 강제 🔴 + `held_reason='quota_exceeded'`.
 - **타임아웃**: `LLM_TIMEOUT_SECONDS=45`, 재시도 1회. 15초는 추론 모델에 비현실적이다.
 - **파이프라인 데드라인**: 🟢/🟡 경로 `LLM_PIPELINE_DEADLINE_SECONDS=25`, 🔴 경로 `LLM_PIPELINE_DEADLINE_RED_SECONDS=35` (M-1 실측 근거는 §0). 초과 시 **그 시점까지의 결과로 🟡 발행 + 카드 생성**(안전망). 결과가 아예 없으면 `status='failed'` + `reason='failed'` 카드 (D23).

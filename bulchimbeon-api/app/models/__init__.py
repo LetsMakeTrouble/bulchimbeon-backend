@@ -13,6 +13,7 @@ from app.models.briefing_run import BriefingRun
 from app.models.document import Chunk, Document, DocumentVersion
 from app.models.event import Event
 from app.models.integration import Integration
+from app.models.job_run import JobRun
 from app.models.lesson import Lesson
 from app.models.llm_usage import LLMUsage
 from app.models.notification import Notification
@@ -33,6 +34,7 @@ __all__ = [
     "Feedback",
     "Guideline",
     "Integration",
+    "JobRun",
     "LLMUsage",
     "Lesson",
     "Notification",

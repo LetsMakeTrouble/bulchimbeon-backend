@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
+from app.core import scheduler
 from app.database import Base, create_engine, get_db
 from app.services import llm, sse_manager, sse_stream_service, sse_ticket_service
 from app.services.llm import usage as llm_usage
@@ -209,12 +210,14 @@ async def task_session_factory(db_connection: AsyncConnection) -> AsyncIterator[
         sse_stream_service.session_factory,
         sync_runner.session_factory,
         llm_usage.session_factory,
+        scheduler.session_factory,
     )
     ingest.session_factory = factory
     answer_pipeline.session_factory = factory
     sse_stream_service.session_factory = factory
     sync_runner.session_factory = factory
     llm_usage.session_factory = factory
+    scheduler.session_factory = factory
     try:
         yield
     finally:
@@ -224,6 +227,7 @@ async def task_session_factory(db_connection: AsyncConnection) -> AsyncIterator[
             sse_stream_service.session_factory,
             sync_runner.session_factory,
             llm_usage.session_factory,
+            scheduler.session_factory,
         ) = originals
 
 

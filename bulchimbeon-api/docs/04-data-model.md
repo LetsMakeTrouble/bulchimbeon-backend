@@ -369,6 +369,23 @@ stateDiagram-v2
   ⚠️ 진행 중인 호출은 파이프라인 종료 시 한 번에 적재되므로 아직 세어지지 않는다 —
   상한의 성격이 회계가 아니라 폭주 방어라서 이 오차를 허용한다.
 
+## 6.3 `job_runs` — 예약 작업 실행 기록 (운영 전환, 2026-08-11)
+
+| 컬럼 | 타입 | 설명 |
+| --- | --- | --- |
+| `job_name` | text | `expiry_sweeper` / `zombie_recovery` / `briefing` |
+| `trigger` | text | `interval`(주기) / `startup`(기동 직후 1회) |
+| `started_at` / `finished_at` | timestamptz | |
+| `status` | text | `ok` / `failed` |
+| `processed_count` | int | 실제로 건드린 건수. **0 이 정상인 잡이 대부분**이라 실패와 구분해야 한다 |
+| `error` | text NULL | 500자로 자른다 |
+
+- 인덱스: `(job_name, started_at)` — "이 잡이 마지막으로 언제 돌았나"가 유일한 조회 패턴
+- ⚠️ **큐가 아니다.** 잡 3종이 전부 상태 파생형이라 할 일은 DB 상태에서 다시 계산된다.
+  여기 남기는 것은 할 일이 아니라 **한 일**이다 (`06 §4`).
+- ⚠️ **프로젝트 스코프가 아니다** — `project_id` 가 없다. `seed.py --reset` 의 삭제
+  대상에서 제외되는 두 테이블 중 하나다(다른 하나는 `users`).
+
 ## 7. 인덱스·제약
 
 - `chunks.embedding`, `official_qas.question_embedding`: `USING hnsw (embedding vector_cosine_ops)`

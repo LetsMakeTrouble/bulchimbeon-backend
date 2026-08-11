@@ -3,6 +3,7 @@
 라우터는 마일스톤마다 추가된다 (`03 §3`). 아직 없는 모듈은 미리 만들지 않는다.
 """
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -18,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app import __version__
 from app.config import MAX_REQUEST_BODY_BYTES, settings
 from app.core.errors import AppError, error_payload
-from app.core.scheduler import create_scheduler
+from app.core.scheduler import create_scheduler, run_startup_jobs
 from app.core.upload_limit import UploadSizeLimitMiddleware
 from app.database import get_db
 from app.routers import (
@@ -75,9 +76,15 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     scheduler = create_scheduler()
     scheduler.start()
     logger.info("scheduler 기동: 잡 %s개", len(scheduler.get_jobs()))
+
+    # ⚠️ 기동 직후 1회 실행. `interval` 트리거의 첫 발화가 "기동 + 주기"라, 이게 없으면
+    #    재배포할 때마다 최대 60분(브리핑)·10분(만료) 동안 아무 잡도 안 돈다.
+    #    태스크로 띄워 기동을 막지 않는다 — 헬스체크가 먼저 통과해야 배포가 성립한다.
+    startup_task = asyncio.create_task(run_startup_jobs())
     try:
         yield
     finally:
+        startup_task.cancel()
         scheduler.shutdown(wait=False)
         logger.info("scheduler 정지")
 

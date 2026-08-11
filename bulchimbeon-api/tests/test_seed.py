@@ -118,14 +118,26 @@ def test_reset_covers_every_project_scoped_table() -> None:
 
     ⚠️ 이 테스트가 지키는 것은 순서가 아니라 **커버리지**다. 나중에 테이블이 하나 늘었을 때
     빠뜨리면 `--reset` 이 FK 위반으로 터지는데, 시드를 돌리는 시점은 보통 **발표 전날 밤**이다.
-    `users` 만 제외다 — 데모 유저는 지우지 않고 재사용한다 (`seed.py` 모듈 독스트링).
+
+    제외는 두 개뿐이고 **둘 다 이유가 다르다**:
+    - `users` — 데모 유저는 지우지 않고 재사용한다 (`seed.py` 모듈 독스트링).
+    - `job_runs` — 애초에 **프로젝트 스코프가 아니다**(`project_id` 컬럼이 없다).
+      프로세스가 무엇을 했는지의 기록이라 특정 프로젝트를 지운다고 사라질 것이 아니다.
+
+    ⛔ 새 테이블을 여기 제외 목록에 넣으려면 **`project_id` 가 정말 없는지** 확인하라.
+    있는데 넣으면 지운 프로젝트의 흔적이 남아 다음 시드의 집계에 섞인다.
     """
     from uuid import uuid4
 
     from app.database import Base
 
+    # ⚠️ "project_id 컬럼이 있나"로 자동 판별할 수 없다 — 다수 테이블이 `question_id`·
+    #    `document_version_id` 를 거쳐 **간접적으로** 프로젝트에 묶인다. 목록을 손으로 적고,
+    #    새 테이블이 생기면 이 어서션이 걸려 판단을 강제한다.
+    exempt = {"users", "job_runs"}
+
     covered = {statement.table.name for statement in seed._reset_statements([uuid4()])}
-    assert set(Base.metadata.tables) - covered == {"users"}
+    assert set(Base.metadata.tables) - covered == exempt
 
 
 # --- 업로드·인제스트 (`08 §5` 2번) ---------------------------------------------------------

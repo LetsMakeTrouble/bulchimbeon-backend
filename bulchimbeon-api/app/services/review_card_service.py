@@ -82,6 +82,7 @@ from app.services import (
     sse_manager,
 )
 from app.services.llm import get_provider
+from app.services.llm import usage as llm_usage
 from app.services.pipeline import dnd
 
 logger = logging.getLogger(__name__)
@@ -459,6 +460,38 @@ def _isoformat(value: datetime | None) -> str | None:
 
 
 async def resolve_card(
+    db: AsyncSession,
+    *,
+    card: ReviewCard,
+    actor: User,
+    action: str,
+    content_en: str | None = None,
+    option_index: int | None = None,
+    reason_en: str | None = None,
+) -> CardActionResponse | CardAnswerOptionResponse:
+    """카드 확정의 단일 관문. 본체는 `_resolve_card` 이고 여기서는 **비용 귀속만** 감싼다.
+
+    이 경로가 부르는 LLM 은 두 가지다 — 확정문 en→ko 번역과 교훈 추출. 둘 다 담당자가
+    촉발한 소비이므로 `actor` 에 귀속시킨다. 질문자가 낸 비용(답변 생성)과 구분돼야
+    "누가 얼마를 썼나"가 의미를 갖는다.
+
+    래퍼로 분리한 이유는 단순하다: 본문을 통째로 들여쓰면 diff 가 커져 실제 변경이 묻힌다.
+    """
+    async with llm_usage.usage_scope(
+        project_id=card.project_id, user_id=actor.id, question_id=card.question_id
+    ):
+        return await _resolve_card(
+            db,
+            card=card,
+            actor=actor,
+            action=action,
+            content_en=content_en,
+            option_index=option_index,
+            reason_en=reason_en,
+        )
+
+
+async def _resolve_card(
     db: AsyncSession,
     *,
     card: ReviewCard,

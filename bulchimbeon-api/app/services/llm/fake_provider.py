@@ -39,8 +39,17 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from app.config import EMBEDDING_DIM_FIXED
+from app.config import EMBEDDING_DIM_FIXED, settings
+from app.models.llm_usage import STEP_ANSWER_TRANSLATE, STEP_EMBED
+from app.services.llm import usage as usage_collector
 from app.services.llm.base import MAX_SCHEMA_RETRIES, LLMProviderError, LLMSchemaError
+
+
+def _fake_tokens(text: str) -> int:
+    """합성 토큰 수. 실제 토크나이저가 아니라 **결정적인 근사**다 — 이 값으로 비용을
+    검증하지 않는다. 검증 대상은 "적재 배선이 살아 있는가" 하나다."""
+    return max(1, len(text) // 4)
+
 
 _MARKER_RE = re.compile(r"\[\[fake:([^\]]*)\]\]")
 _ALIAS_RE = re.compile(r"\bch-\d+\b")
@@ -105,6 +114,13 @@ class FakeLLMProvider:
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         self.embed_calls.append(list(texts))
+        usage_collector.record(
+            step=STEP_EMBED,
+            model=settings.embedding_model,
+            input_tokens=sum(_fake_tokens(text) for text in texts),
+            output_tokens=0,
+            reasoning_tokens=0,
+        )
         if self.embed_failure is not None and any(self.embed_failure in text for text in texts):
             raise LLMProviderError(f"fake embed failure: {self.embed_failure}")
         return [deterministic_embedding(text) for text in texts]
@@ -116,6 +132,9 @@ class FakeLLMProvider:
         schema: type[BaseModel],
         *,
         model: str | None = None,
+        # 비용 귀속 라벨. fake 는 토큰을 만들지 않으므로 받기만 하고 쓰지 않는다 —
+        # 시그니처가 갈리면 실 프로바이더로 바꿔 끼울 수 없다 (룰 2).
+        step: str = "unknown",
     ) -> dict[str, Any]:
         """실 프로바이더와 **같은 재시도 구조**를 따른다 (`06 §2` ④).
 
@@ -130,6 +149,16 @@ class FakeLLMProvider:
         last_error: Exception | None = None
         for _ in range(1 + MAX_SCHEMA_RETRIES):
             raw = self._raw_payload(schema, user)
+            # ⚠️ 실 프로바이더와 **같은 자리**에서 사용량을 기록한다. 여기가 비면 적재 배선이
+            #    테스트에서 한 번도 안 타고, 배선이 끊겨도 전부 초록으로 지나간다.
+            #    토큰 수는 결정적 합성값이다 — 실제 값이 아니라 "기록되는가"를 보는 것이다.
+            usage_collector.record(
+                step=step,
+                model=model or settings.llm_model_answer,
+                input_tokens=_fake_tokens(system) + _fake_tokens(user),
+                output_tokens=_fake_tokens(str(raw)),
+                reasoning_tokens=0,
+            )
             try:
                 return schema.model_validate(raw).model_dump()
             except ValidationError as exc:
@@ -139,6 +168,13 @@ class FakeLLMProvider:
 
     async def translate(self, text: str, source: str, target: str) -> str:
         self.translate_calls.append((text, source, target))
+        usage_collector.record(
+            step=STEP_ANSWER_TRANSLATE,
+            model=settings.llm_model_answer_translate,
+            input_tokens=_fake_tokens(text),
+            output_tokens=_fake_tokens(text),
+            reasoning_tokens=0,
+        )
         return f"[{target}] {text}"
 
     # --- 단계별 결정적 출력 -------------------------------------------------------------

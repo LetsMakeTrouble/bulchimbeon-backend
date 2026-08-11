@@ -60,6 +60,7 @@ class LLMProvider(Protocol):
         schema: type[BaseModel],
         *,
         model: str | None = None,
+        step: str = "unknown",
     ) -> dict[str, Any]:
         """Structured Outputs strict 호출 (`06 §2` ①②④⑤⑦).
 
@@ -68,6 +69,10 @@ class LLMProvider(Protocol):
         재시도하고 소진하면 `LLMSchemaError` 다.
 
         `model` 로 호출 모델을 바꾼다 — ⑤ 근거 검증이 `LLM_MODEL_VERIFY` 를 쓰는 근거다.
+
+        `step` 은 **비용 귀속용 라벨**이다 (`llm_usage.step`). 호출을 어느 단계가 냈는지는
+        프로바이더가 알 수 없고, 그렇다고 인자 없이 넘기면 "누가 비용을 냈나"에 답할 수
+        없다. 기본값 `"unknown"` 은 스크립트처럼 단계 개념이 없는 경로용이다.
         """
         ...
 

@@ -470,7 +470,7 @@ async def test_quota_exceeded_is_forced_red_without_any_llm_call(
 ) -> None:
     """한도를 넘기면 LLM 을 한 번도 부르지 않고 🔴 이다 (`06 §6`)."""
     await patch_project_settings(db_session, team.project_id, daily_llm_call_limit=3)
-    quota.set_used(as_uuid(team.project_id), 3)
+    await quota.set_used(db_session, as_uuid(team.project_id), 3)
     before = len(fake_llm_provider.complete_json_calls)
 
     content_ko = "환불 기한이 며칠인가요?"
@@ -493,7 +493,7 @@ async def test_quota_exceeded_stays_red_under_dnd(
         dnd_start="00:00",
         dnd_end="23:59",
     )
-    quota.set_used(as_uuid(team.project_id), 5)
+    await quota.set_used(db_session, as_uuid(team.project_id), 5)
 
     detail = await ask_and_get(client, team.asker, team.project_id, "환불 기한이 며칠인가요?")
 
@@ -782,9 +782,11 @@ async def test_verify_receives_the_whole_chunk_not_a_display_snippet(
     seen: list[str] = []
     original = fake_llm_provider.complete_json
 
-    async def recording(system: str, user: str, schema: Any, *, model: str | None = None) -> Any:
+    async def recording(
+        system: str, user: str, schema: Any, *, model: str | None = None, step: str = "unknown"
+    ) -> Any:
         seen.append(user)
-        return await original(system, user, schema, model=model)
+        return await original(system, user, schema, model=model, step=step)
 
     monkeypatch.setattr(fake_llm_provider, "complete_json", recording)
 

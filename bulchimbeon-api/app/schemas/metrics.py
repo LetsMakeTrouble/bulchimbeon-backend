@@ -10,6 +10,7 @@
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
@@ -159,3 +160,37 @@ class MetricsTimeseries(BaseModel):
     window_days: int
     bucket: Bucket
     items: list[TimeseriesItem]
+
+
+class UsageTotalsOut(BaseModel):
+    """⚠️ `reasoning_tokens` 는 `output_tokens` 에 **포함된** 값이다. 화면에서 더하지 마라."""
+
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    reasoning_tokens: int
+    cost_usd: Decimal
+
+
+class UsageByActorOut(BaseModel):
+    """`user_id` 가 null 인 묶음은 사람이 촉발하지 않은 호출이다(스케줄러 경유 교훈 추출 등)."""
+
+    user_id: UUID | None
+    user_name: str | None
+    totals: UsageTotalsOut
+
+
+class UsageByStepOut(BaseModel):
+    step: str
+    totals: UsageTotalsOut
+
+
+class ProjectUsage(BaseModel):
+    """`GET /projects/{id}/usage` — 담당자 전용 (비용은 프로젝트 소유자 정보다)."""
+
+    window_days: int
+    total: UsageTotalsOut
+    by_actor: list[UsageByActorOut]
+    by_step: list[UsageByStepOut]
+    daily_call_limit: int
+    calls_today: int

@@ -61,6 +61,7 @@ from app.models.document import Chunk, Document, DocumentVersion  # noqa: E402
 from app.models.event import Event  # noqa: E402
 from app.models.integration import Integration  # noqa: E402
 from app.models.lesson import Lesson  # noqa: E402
+from app.models.llm_usage import LLMUsage  # noqa: E402
 from app.models.notification import Notification  # noqa: E402
 from app.models.official_qa import OfficialQA  # noqa: E402
 from app.models.project import Guideline, Project, ProjectMember  # noqa: E402
@@ -207,6 +208,8 @@ def _reset_statements(project_ids: list[UUID]) -> list[Executable]:
         update(Answer)
         .where(Answer.question_id.in_(question_ids))
         .values(official_qa_id=None, similar_official_qa_id=None),
+        # 사용량 기록도 프로젝트 스코프다 — 남기면 지운 프로젝트의 비용이 집계에 계속 잡힌다.
+        delete(LLMUsage).where(LLMUsage.project_id.in_(project_ids)),
         delete(Lesson).where(Lesson.project_id.in_(project_ids)),
         delete(AnswerCitation).where(AnswerCitation.answer_id.in_(answer_ids)),
         delete(Feedback).where(Feedback.answer_id.in_(answer_ids)),

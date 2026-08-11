@@ -62,6 +62,7 @@ from app.services import (
     sse_manager,
 )
 from app.services.llm import LLMSchemaError, get_provider
+from app.services.llm import usage as llm_usage
 from app.services.pipeline import dnd, grading, prompts, quota, retrieval
 from app.services.pipeline.llm_schemas import (
     QuestionStructOut,
@@ -143,10 +144,13 @@ class _Ctx:
     async def call_json(
         self, *, step: str, system: str, user: str, schema: type, model: str
     ) -> dict[str, Any]:
-        """LLM 1회 + 단계별 elapsed 로깅 + 일일 호출 카운트 (`06 §6`)."""
-        quota.consume(self.project.id)
+        """LLM 1회 + 단계별 elapsed 로깅 (`06 §6`).
+
+        ⚠️ 여기서 호출 수를 세지 않는다. 일일 상한은 `llm_usage` 행 수에서 파생되고,
+        그 행은 프로바이더가 실제 usage 를 받은 뒤에 만들어진다 (`services/llm/usage`).
+        """
         before = self.elapsed_ms()
-        result = await get_provider().complete_json(system, user, schema, model=model)
+        result = await get_provider().complete_json(system, user, schema, model=model, step=step)
         self.steps.append((step, self.elapsed_ms() - before))
         logger.info(
             "pipeline step=%s question=%s elapsed_ms=%s",
@@ -168,6 +172,8 @@ async def run_answer_pipeline(question_id: UUID) -> None:
     프론트의 재조회가 커밋 전 상태를 읽는다 (`sse_manager` 독스트링).
     """
     outcome: _Outcome | None = None
+    # 사용량 수집은 파이프라인 성패와 무관하게 끝까지 간다 — 실패해도 토큰은 이미 썼다.
+    usage_tokens = llm_usage.begin()
 
     try:
         async with session_factory() as db:  # 태스크 자체 세션
@@ -182,6 +188,8 @@ async def run_answer_pipeline(question_id: UUID) -> None:
                 await db.commit()
         except Exception:
             logger.exception("answer pipeline 실패 기록마저 실패: question=%s", question_id)
+    finally:
+        await llm_usage.flush(usage_tokens)
 
     if outcome is not None:
         logger.info(
@@ -272,8 +280,12 @@ async def _pipeline(db: AsyncSession, question_id: UUID) -> _Outcome | None:
         db=db, question=question, project=project, answerer=answerer, started=time.monotonic()
     )
 
+    # 이 질문이 만드는 LLM 호출의 비용 귀속 대상. 질문자에게 붙인다 —
+    # 답변 생성은 질문자가 촉발한 소비이고, 담당자가 낸 비용(확정문 번역)과 구분돼야 한다.
+    llm_usage.bind(project_id=project.id, user_id=question.asker_id, question_id=question.id)
+
     # --- 일일 호출 상한 (`06 §6`) — LLM 을 한 번도 부르기 전에 본다 -----------------------
-    if quota.is_exceeded(project.id, ctx.setting("daily_llm_call_limit")):
+    if await quota.is_exceeded(db, project.id, ctx.setting("daily_llm_call_limit")):
         logger.warning("daily_llm_call_limit 초과: project=%s", project.id)
         return await _publish_generated(
             ctx,

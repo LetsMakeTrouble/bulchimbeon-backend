@@ -19,6 +19,8 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, ValidationError
 
 from app.config import EMBEDDING_DIM_FIXED, settings
+from app.models.llm_usage import STEP_ANSWER_TRANSLATE, STEP_EMBED  # noqa: E402
+from app.services.llm import usage as usage_collector
 from app.services.llm.base import (
     MAX_SCHEMA_RETRIES,
     LLMProviderError,
@@ -37,11 +39,12 @@ MAX_OUTPUT_TOKENS = 8192
 # --------------------------------------------------------------------------------------
 # 토큰 사용량 관측 (`03 §4.2`)
 #
-# ⚠️ 이것은 **단가 산정용 관측**이지 회계가 아니다. 일일 상한(`daily_llm_call_limit`)은
-# 토큰이 아니라 호출 **수**로 세며(`pipeline/quota.py`) 여기 값과 무관하다 — 둘을 엮으면
-# 상한의 성격이 "폭주 방어"에서 "과금 통제"로 바뀌어 룰 3 의 임계값 정의와 어긋난다.
+# 여기 `_usage_log` 는 **측정 스크립트용 프로세스 메모리 버퍼**다(재시작하면 사라진다).
+# 운영 적재는 `services/llm/usage` 가 `llm_usage` 테이블로 가져간다 — 일일 상한도 그 테이블
+# 행 수에서 파생되므로, 둘은 같은 원천을 본다.
 #
-# 프로세스 메모리이고 재시작하면 사라진다. 누적을 보려면 로그(`llm usage …`)를 쓴다.
+# ⚠️ 상한의 성격은 여전히 **폭주 방어**이지 과금 통제가 아니다. 정확한 차단이 필요해지면
+# 호출 수가 아니라 토큰·비용 기준으로 바꿔야 한다 (`pipeline/quota.py`).
 # `reasoning_tokens` 는 `output_tokens` 에 **포함된** 값이다 — 더하면 이중 계상이다.
 # --------------------------------------------------------------------------------------
 _usage_log: list[dict[str, Any]] = []
@@ -57,8 +60,12 @@ def reset_usage_log() -> None:
     _usage_log.clear()
 
 
-def _record_usage(model: str, response: Any) -> None:
-    """`responses.parse` 응답의 usage 를 기록한다. usage 가 없으면 조용히 넘어간다."""
+def _record_usage(model: str, response: Any, *, step: str = "unknown") -> None:
+    """`responses.parse` 응답의 usage 를 기록한다. usage 가 없으면 조용히 넘어간다.
+
+    두 곳으로 나간다: 프로세스 메모리 로그(`usage_log()` — 측정 스크립트용)와
+    `services/llm/usage` 버퍼(스코프가 열려 있으면 DB 로 적재된다).
+    """
     usage = getattr(response, "usage", None)
     if usage is None:
         return
@@ -70,6 +77,7 @@ def _record_usage(model: str, response: Any) -> None:
         "reasoning_tokens": (getattr(details, "reasoning_tokens", 0) or 0) if details else 0,
     }
     _usage_log.append(record)
+    usage_collector.record(step=step, **record)
     logger.info(
         "llm usage model=%s in=%s out=%s reasoning=%s",
         record["model"],
@@ -112,14 +120,14 @@ class OpenAIProvider:
         # 임베딩 usage 는 `prompt_tokens` 한 칸뿐이다(출력 토큰 개념이 없다).
         usage = getattr(response, "usage", None)
         if usage is not None:
-            _usage_log.append(
-                {
-                    "model": settings.embedding_model,
-                    "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
-                    "output_tokens": 0,
-                    "reasoning_tokens": 0,
-                }
-            )
+            record = {
+                "model": settings.embedding_model,
+                "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                "output_tokens": 0,
+                "reasoning_tokens": 0,
+            }
+            _usage_log.append(record)
+            usage_collector.record(step=STEP_EMBED, **record)
 
         # 응답 순서 보장은 index 필드로만 확실해진다.
         ordered = sorted(response.data, key=lambda item: item.index)
@@ -142,6 +150,7 @@ class OpenAIProvider:
         schema: type[BaseModel],
         *,
         model: str | None = None,
+        step: str = "unknown",
     ) -> dict[str, Any]:
         """strict Structured Outputs (`06 §2` ①②④⑤⑦).
 
@@ -179,7 +188,7 @@ class OpenAIProvider:
                 raise LLMProviderError(f"responses.parse 호출 실패: {exc}") from exc
 
             # 스키마 재시도로 버린 응답도 토큰은 이미 썼다 — parsed 검사 **전에** 기록한다.
-            _record_usage(str(params["model"]), response)
+            _record_usage(str(params["model"]), response, step=step)
 
             parsed = response.output_parsed
             if parsed is None:
@@ -213,5 +222,6 @@ class OpenAIProvider:
             # ⚠️ `llm_model_translate`(① 질문 번역)가 아니다 — 이 경로는 담당자 확정문
             # en→ko 이고, 그 결과가 **재번역 금지된 확정 원문**으로 굳는다 (룰 4).
             model=settings.llm_model_answer_translate,
+            step=STEP_ANSWER_TRANSLATE,
         )
         return str(result["text"])

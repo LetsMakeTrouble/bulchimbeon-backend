@@ -865,6 +865,40 @@ Accept: text/event-stream
 
 ---
 
+## 13.1 사용량·비용 `GET /projects/{id}/usage` (담당자 전용)
+
+⛔ **담당자만** 볼 수 있다 (`require_answerer`). 지표·타임라인과 달리 비용은 팀 성과가 아니라
+프로젝트 소유자 정보이고, "누가 얼마나 썼나"는 질문자끼리 서로 볼 것이 아니다.
+
+쿼리: `window_days` (기본 30, 1~365)
+
+```json
+{
+  "window_days": 30,
+  "total": {"calls": 412, "input_tokens": 903120, "output_tokens": 61840,
+            "reasoning_tokens": 1200, "cost_usd": "3.184920"},
+  "by_actor": [
+    {"user_id": "…", "user_name": "지수",
+     "totals": {"calls": 300, "input_tokens": 700000, "output_tokens": 45000,
+                "reasoning_tokens": 900, "cost_usd": "2.410000"}},
+    {"user_id": null, "user_name": null,
+     "totals": {"calls": 12, "input_tokens": 8000, "output_tokens": 400,
+                "reasoning_tokens": 0, "cost_usd": "0.012000"}}
+  ],
+  "by_step": [
+    {"step": "generate", "totals": {"calls": 120, "…": "…"}},
+    {"step": "verify", "totals": {"calls": 118, "…": "…"}}
+  ],
+  "daily_call_limit": 500,
+  "calls_today": 137
+}
+```
+
+- `by_actor` 의 `user_id: null` 묶음은 **사람이 촉발하지 않은 호출**이다(스케줄러 경유 등).
+- ⚠️ `reasoning_tokens` 는 `output_tokens` 에 **포함**된 값이다. 화면에서 더하지 마라.
+- `calls_today` 는 일일 상한 판정과 **같은 계산**(UTC 오늘 행 수)이라 화면 숫자와 실제
+  차단 시점이 어긋나지 않는다.
+
 ## 14. 헬스체크
 
 `GET /health` → `{ "status":"ok", "db":"ok", "version":"0.1.0" }` (인증 불필요)

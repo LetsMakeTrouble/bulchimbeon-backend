@@ -345,6 +345,30 @@ stateDiagram-v2
 - 모든 전이는 `question.status_changed`(payload: `from`, `to`) 이벤트를 발행한다 (§5).
 - `answered`·`failed`에서 되돌아가는 전이는 없다. 답변 재생성 API가 없으므로(`answers`의 `UNIQUE(question_id)`) 질문 하나의 종착은 `answered` 또는 `failed`다.
 
+## 6.2 `llm_usage` — LLM 호출 사용량·비용 (운영 전환, 2026-08-11)
+
+**호출 1회 = 1행.** 종전에는 이 정보가 어디에도 없었다 — 호출 수는 프로세스 메모리
+딕셔너리라 재시작하면 0 이 됐고 토큰·비용은 아예 기록되지 않았다.
+
+| 컬럼 | 타입 | 설명 |
+| --- | --- | --- |
+| `project_id` | uuid NOT NULL | 비용의 소유 주체 |
+| `user_id` | uuid NULL | 촉발한 계정. 스케줄러 경유 호출은 NULL |
+| `question_id` | uuid NULL | 파이프라인 밖 호출(확정문 번역·인제스트 임베딩)은 NULL |
+| `step` | text | `translate` `reuse_gate` `generate` `verify` `structure` `answer_translate` `lesson` `embed` |
+| `model` | text | 호출 모델명 |
+| `input_tokens` / `output_tokens` | int | |
+| `reasoning_tokens` | int | ⚠️ **`output_tokens` 에 포함된 값**이다. 합계에서 따로 더하면 이중 계상 |
+| `cost_usd` | numeric(12,6) | **기록 시점 단가로 스냅샷**. 조회 때 재계산하지 않는다 |
+
+- 인덱스: `(project_id, created_at)` — 일일 한도 판정 + 프로젝트 집계 /
+  `(user_id, created_at)` — 계정별 집계
+- **`events` 가 아닌 이유**: 룰 4 의 대상은 *상태 변화*이지 자원 소비가 아니다. 조회 패턴도
+  다르다 — events 는 타임라인(프로젝트+시각), 여기는 집계(주체+기간 SUM).
+- **`daily_llm_call_limit` 판정이 이 테이블에서 파생된다** (`services/pipeline/quota.py`).
+  ⚠️ 진행 중인 호출은 파이프라인 종료 시 한 번에 적재되므로 아직 세어지지 않는다 —
+  상한의 성격이 회계가 아니라 폭주 방어라서 이 오차를 허용한다.
+
 ## 7. 인덱스·제약
 
 - `chunks.embedding`, `official_qas.question_embedding`: `USING hnsw (embedding vector_cosine_ops)`

@@ -33,9 +33,10 @@ from sqlalchemy.pool import NullPool
 from app.config import settings
 from app.database import Base, create_engine, get_db
 from app.services import llm, sse_manager, sse_stream_service, sse_ticket_service
+from app.services.llm import usage as llm_usage
 from app.services.llm.fake_provider import FakeLLMProvider
 from app.services.pipeline import answer as answer_pipeline
-from app.services.pipeline import ingest, quota
+from app.services.pipeline import ingest
 from app.services.sync import runner as sync_runner
 
 # ⚠️ `Base.metadata.create_all` 이 테이블을 만들려면 모델이 먼저 등록돼 있어야 한다.
@@ -207,11 +208,13 @@ async def task_session_factory(db_connection: AsyncConnection) -> AsyncIterator[
         answer_pipeline.session_factory,
         sse_stream_service.session_factory,
         sync_runner.session_factory,
+        llm_usage.session_factory,
     )
     ingest.session_factory = factory
     answer_pipeline.session_factory = factory
     sse_stream_service.session_factory = factory
     sync_runner.session_factory = factory
+    llm_usage.session_factory = factory
     try:
         yield
     finally:
@@ -220,6 +223,7 @@ async def task_session_factory(db_connection: AsyncConnection) -> AsyncIterator[
             answer_pipeline.session_factory,
             sse_stream_service.session_factory,
             sync_runner.session_factory,
+            llm_usage.session_factory,
         ) = originals
 
 
@@ -236,15 +240,8 @@ def reset_sse_state() -> Iterator[None]:
     sse_manager.reset()
 
 
-@pytest.fixture(autouse=True)
-def reset_llm_quota() -> Iterator[None]:
-    """일일 LLM 호출 카운터는 **프로세스 메모리**다 (`services/pipeline/quota.py`).
-
-    비우지 않으면 앞선 테스트의 호출이 쌓여 뒤 테스트가 뜬금없이 `quota_exceeded` 로 떨어진다.
-    """
-    quota.reset()
-    yield
-    quota.reset()
+# ⚠️ 일일 호출 카운터를 비우는 픽스처는 없어졌다. 카운터가 `llm_usage` 행에서 파생되므로
+#    테스트별 트랜잭션 롤백이 그대로 격리를 만든다 (`03 §5.3`).
 
 
 @pytest_asyncio.fixture

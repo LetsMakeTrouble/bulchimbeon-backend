@@ -6,17 +6,30 @@
 읽기 전용이라 커밋하지 않는다 — 부수 효과가 있는 GET 은 카드 상세 하나뿐이다(`05 §7`).
 """
 
+from dataclasses import asdict
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, require_member
+from app.config import DEFAULT_SETTINGS
+from app.core.deps import get_current_user, require_answerer, require_member
 from app.database import get_db
-from app.models.project import ProjectMember
+from app.models.project import Project, ProjectMember
 from app.models.user import User
-from app.schemas.metrics import Bucket, EventListResponse, MetricsTimeseries, ProjectMetrics
-from app.services import event_service, metrics_service
+from app.schemas.metrics import (
+    Bucket,
+    EventListResponse,
+    MetricsTimeseries,
+    ProjectMetrics,
+    ProjectUsage,
+    UsageByActorOut,
+    UsageByStepOut,
+    UsageTotalsOut,
+)
+from app.services import event_service, metrics_service, usage_service
+from app.services.pipeline import quota
 
 router = APIRouter()
 
@@ -95,3 +108,47 @@ async def get_metrics_timeseries(
     - 질문이 없는 날도 **0 으로 채워** 내려준다.
     """
     return await metrics_service.timeseries(db, project_id=project_id, days=days, bucket=bucket)
+
+
+@router.get("/projects/{project_id}/usage", response_model=ProjectUsage, tags=["metrics"])
+async def project_usage(
+    project_id: UUID,
+    window_days: int = Query(default=30, ge=1, le=365),
+    member: ProjectMember = Depends(require_answerer),
+    db: AsyncSession = Depends(get_db),
+) -> ProjectUsage:
+    """프로젝트의 LLM 사용량·비용 (`llm_usage`).
+
+    ⛔ **담당자 전용**이다 — 지표·타임라인과 달리 비용은 팀 성과가 아니라 소유자 정보이고,
+    "누가 얼마나 썼나"는 질문자끼리 서로 볼 것이 아니다.
+
+    `calls_today` 는 일일 상한 판정과 **같은 계산**(UTC 오늘 행 수)이라 화면의 숫자와
+    실제 차단 시점이 어긋나지 않는다 (`pipeline/quota.py`).
+    """
+    # 권한은 `require_answerer` 가 이미 봤다 — 여기서는 상한값만 읽는다.
+    project = await db.get(Project, project_id)
+    settings_map = project.settings if project is not None else {}
+    since = datetime.now(UTC) - timedelta(days=window_days)
+
+    return ProjectUsage(
+        window_days=window_days,
+        total=UsageTotalsOut(
+            **asdict(await usage_service.project_totals(db, project_id=project_id, since=since))
+        ),
+        by_actor=[
+            UsageByActorOut(
+                user_id=row.user_id,
+                user_name=row.user_name,
+                totals=UsageTotalsOut(**asdict(row.totals)),
+            )
+            for row in await usage_service.by_actor(db, project_id=project_id, since=since)
+        ],
+        by_step=[
+            UsageByStepOut(step=row.step, totals=UsageTotalsOut(**asdict(row.totals)))
+            for row in await usage_service.by_step(db, project_id=project_id, since=since)
+        ],
+        daily_call_limit=int(
+            settings_map.get("daily_llm_call_limit", DEFAULT_SETTINGS["daily_llm_call_limit"])
+        ),
+        calls_today=await quota.used(db, project_id),
+    )

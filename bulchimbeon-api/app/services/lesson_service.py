@@ -28,6 +28,7 @@ from app.models.lesson import (
     LESSON_STATUS_DELETED,
     Lesson,
 )
+from app.models.llm_usage import STEP_LESSON
 from app.models.project import Project
 from app.models.question import Answer, Question
 from app.schemas.lesson import LessonItem, LessonListResponse
@@ -82,7 +83,9 @@ async def extract_candidate(
     ⚠️ **이 호출은 `daily_llm_call_limit` 을 소모하지 않는다.** 그 한도의 정의된 실패
     동작은 질문 파이프라인의 강제 🔴 `quota_exceeded` 하나뿐이고(`06 §6`), 담당자 확정
     경로에는 소진 시 동작이 정의돼 있지 않다. 한도로 담당자의 저장을 막으면 룰 9(담당자
-    저장이 항상 우선)를 어기게 되므로 `quota.consume` 을 부르지 않는다.
+    저장이 항상 우선)를 어기게 되므로 일일 상한 판정을 거치지 않는다.
+    ⚠️ 그래도 **비용은 발생하고 `llm_usage` 에 기록된다** — 상한 대상이 아닌 것과
+    기록 대상이 아닌 것은 다르다.
     """
     if original_content_en is None:
         logger.info("원답이 없어 교훈을 추출하지 않는다: answer=%s", answer.id)
@@ -98,6 +101,7 @@ async def extract_candidate(
             ),
             LessonOut,
             model=env_settings.llm_model_lesson,
+            step=STEP_LESSON,
         )
     except LLMProviderError:
         # 룰 9 — 담당자의 확정을 교훈 추출 실패로 되돌리지 않는다. 부수 산출물만 포기한다.

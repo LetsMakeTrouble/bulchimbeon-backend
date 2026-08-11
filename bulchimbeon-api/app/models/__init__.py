@@ -14,6 +14,7 @@ from app.models.document import Chunk, Document, DocumentVersion
 from app.models.event import Event
 from app.models.integration import Integration
 from app.models.lesson import Lesson
+from app.models.llm_usage import LLMUsage
 from app.models.notification import Notification
 from app.models.official_qa import OfficialQA
 from app.models.project import Guideline, Project, ProjectMember
@@ -32,6 +33,7 @@ __all__ = [
     "Feedback",
     "Guideline",
     "Integration",
+    "LLMUsage",
     "Lesson",
     "Notification",
     "OfficialQA",

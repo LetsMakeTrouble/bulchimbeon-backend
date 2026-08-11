@@ -96,6 +96,18 @@ class Settings(BaseSettings):
     #    담당자는 임계값 변경·문서 삭제·지침 교체 권한을 가진다.
     demo_password: str = "demo1234!"
 
+    # 동시성 (운영 전환 항목 A)
+    #
+    # ⚠️ 세 값은 **함께** 움직인다. 파이프라인 1건이 커넥션 1개를 5~15초 붙잡으므로
+    #    `db_pool_size + db_max_overflow` 는 `pipeline_max_concurrency` 보다 넉넉히 커야
+    #    요청 처리용(질문 접수·조회) 여유가 남는다. 그러지 않으면 상한을 둔 의미가 없다.
+    #    기본값: 파이프라인 8 + 요청용 12 = 20.
+    # ⛔ SQLAlchemy 기본값(5+10=15)을 그대로 쓰면 안 된다 — 그 값이 곧 실질 상한이 되어
+    #    동시 질문 15건에서 **신규 접수까지** 막혔다.
+    pipeline_max_concurrency: int = 8
+    db_pool_size: int = 10
+    db_max_overflow: int = 10
+
     # DB
     database_url: str = "postgresql+asyncpg://bulchimbeon:bulchimbeon@localhost:5432/bulchimbeon"
     test_database_url: str = (

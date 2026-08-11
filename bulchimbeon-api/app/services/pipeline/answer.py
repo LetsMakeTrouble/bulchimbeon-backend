@@ -63,7 +63,7 @@ from app.services import (
 )
 from app.services.llm import LLMSchemaError, get_provider
 from app.services.llm import usage as llm_usage
-from app.services.pipeline import dnd, grading, prompts, quota, retrieval
+from app.services.pipeline import concurrency, dnd, grading, prompts, quota, retrieval
 from app.services.pipeline.llm_schemas import (
     QuestionStructOut,
     SameQuestionOut,
@@ -176,7 +176,10 @@ async def run_answer_pipeline(question_id: UUID) -> None:
     usage_tokens = llm_usage.begin()
 
     try:
-        async with session_factory() as db:  # 태스크 자체 세션
+        # ⛔ 순서가 사양이다: **슬롯 → 세션 → 데드라인 시계**.
+        #    세션을 먼저 열면 대기 중인 질문이 커넥션을 쥔 채 줄을 서고,
+        #    시계를 먼저 켜면 줄을 섰다는 이유로 데드라인을 넘긴다.
+        async with concurrency.pipeline_slot(), session_factory() as db:  # 태스크 자체 세션
             outcome = await _pipeline(db, question_id)
             await db.commit()
     except Exception as exc:

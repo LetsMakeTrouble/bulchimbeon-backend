@@ -38,6 +38,15 @@ def create_engine(url: str, **kwargs: object) -> AsyncEngine:
     엔진을 새로 만드는 모든 경로(앱·테스트·마이그레이션)가 이 함수를 거친다.
     벡터 코덱은 등록하지 않는다 — 이유는 모듈 독스트링 참조.
     """
+    # ⚠️ 풀 크기를 **명시한다.** 생략하면 SQLAlchemy 기본값 5+10=15 가 실질 동시성 상한이
+    #    되고, 파이프라인이 커넥션을 15초씩 붙잡으므로 동시 질문 15건에서 신규 요청까지
+    #    막힌다 (`services/pipeline/concurrency.py`).
+    #
+    # 단 `poolclass` 를 지정한 호출(테스트의 `NullPool`)에는 붙이지 않는다 —
+    # 크기 개념이 없는 풀이라 인자를 받으면 엔진 생성 자체가 죽는다.
+    if "poolclass" not in kwargs:
+        kwargs.setdefault("pool_size", settings.db_pool_size)
+        kwargs.setdefault("max_overflow", settings.db_max_overflow)
     return create_async_engine(url, pool_pre_ping=True, **kwargs)
 
 

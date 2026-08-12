@@ -535,3 +535,60 @@ SET hnsw.iterative_scan = 'relaxed_order';                     -- 에러면 버�
 ⚠️ **커넥션 수**를 함께 본다. 앱이 최대 `DB_POOL_SIZE + DB_MAX_OVERFLOW`(기본 20) 개를
 잡는다. 매니지드 DB 의 `max_connections` 가 그보다 빠듯하면(소형 인스턴스는 20~25 인
 경우가 있다) 풀 크기와 `PIPELINE_MAX_CONCURRENCY` 를 함께 줄여야 한다 (`03 §4.3`).
+
+### 9.4 도커로 통째로 띄우기 (2026-08-12)
+
+운영 서버를 직접 운영할 때의 구성이다. `docker-compose.prod.yml` + `.env.prod`.
+
+```bash
+cp .env.prod.example .env.prod        # 값을 채운다 (생성 커맨드가 주석에 있다)
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+```
+
+⛔ **개발용 `docker-compose.yml` 과 섞지 마라.** 그쪽은 DB 만 띄우고 앱은 호스트에서 도는
+개발 표준이며(`§5.1`) 비밀값이 개발용으로 박혀 있고 마이그레이션도 돌지 않는다.
+
+**구성**
+
+| 서비스 | 역할 |
+| --- | --- |
+| `db` | `pgvector/pgvector:pg18`. 호스트 포트를 **열지 않는다** |
+| `migrate` | `alembic upgrade head` 를 돌리고 **종료하는 원샷** |
+| `api` | `migrate` 가 성공해야 시작한다 (`service_completed_successfully`) |
+
+> ### 왜 마이그레이션을 앱 커맨드에 붙이지 않았나
+> `sh -c 'alembic upgrade head && exec uvicorn …'` 로 묶으면 마이그레이션 실패가 앱
+> 재시작 루프에 묻혀 원인이 안 보인다. 별도 서비스로 두면 **거기서 멈추고 로그가 남는다.**
+> (Railway 는 서비스가 하나뿐이라 그쪽에서는 묶을 수밖에 없다 — `09 §2`.)
+
+> ### ⛔ 비밀값에 기본값을 두지 않는다
+> `${SECRET_KEY:?...}` 문법이라 안 채우면 **컨테이너가 뜨기 전에** 이유와 함께 죽는다.
+> `SECRET_KEY=change-me` 인 채로 조용히 뜨는 것이 최악이다 — 로그인 토큰을 누구나
+> 위조할 수 있다.
+
+**검증 실적 (2026-08-12, 실제 기동)**
+
+| 확인 | 결과 |
+| --- | --- |
+| 기동 순서 | db healthy → migrate 종료(0) → api 시작 ✓ |
+| 스키마 | 21 테이블 · `alembic_version=0012` · pgvector 0.8.6 ✓ |
+| `/health` | `{"status":"ok","db":"ok"}` ✓ |
+| `--workers 1` | PID 1 커맨드로 확인 ✓ (룰 9) |
+| 실행 사용자 | `uid=10001(appuser)` — root 아님 ✓ |
+| 업로드 볼륨 | appuser 로 쓰기 가능 ✓ (Railway 에서 겪은 소유권 문제가 없다) |
+| CORS | 지정 오리진 허용 · 그 외 차단 ✓ |
+| DB 포트 | 호스트 미노출 ✓ |
+| 기동 잡 | `job_runs` 에 `zombie_recovery→expiry_sweeper→briefing` 이 `startup/ok` 로 기록 ✓ |
+
+**리버스 프록시를 앞에 둘 때**
+
+- ⚠️ **SSE 는 버퍼링을 끄지 않으면 죽는다.** nginx 라면 `proxy_buffering off;` 와 긴
+  `proxy_read_timeout`(권장 1h+)이 필요하다. 앱이 `X-Accel-Buffering: no` 를 보내므로
+  nginx 는 대개 알아서 처리하지만, 다른 프록시는 직접 꺼야 한다.
+- `API_PORT` 를 `127.0.0.1:8000` 으로 묶어 프록시만 붙게 하는 것을 권한다.
+
+**백업 — 두 가지를 함께 받아야 한다**
+
+- `pgdata` 볼륨 (또는 `pg_dump`) — 질문·답변·청크·임베딩
+- **`storage` 볼륨** — 업로드 **원본 파일**. DB 만 백업하면 청크는 남지만 원문은 복구되지
+  않는다. 문서 재인제스트도 불가능해진다.

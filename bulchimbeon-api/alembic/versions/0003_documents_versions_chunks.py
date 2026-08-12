@@ -8,7 +8,7 @@ Create Date: 2026-08-08 07:40:08.193066
 
 from collections.abc import Sequence
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 
 # ⚠️ 03 §5.4 ② — autogenerate 는 벡터 컬럼을 `pgvector.sqlalchemy.vector.VECTOR(dim=1536)` 로
@@ -29,7 +29,34 @@ depends_on: str | Sequence[str] | None = None
 MIN_PGVECTOR_VERSION = (0, 8, 0)
 
 
+# 오프라인(`alembic upgrade head --sql`)에는 연결이 없어 버전을 물어볼 수 없다.
+# 그렇다고 그냥 건너뛰면 **DDL 경로만 보호를 잃는다** — 운영 DB 를 DDL 로 만드는 쪽이
+# 오히려 더 위험한 경로다. 그래서 같은 판정을 SQL 안에 심어 내보낸다.
+_PGVECTOR_GUARD_SQL = """
+DO $$
+DECLARE ext_version text;
+BEGIN
+    SELECT extversion INTO ext_version FROM pg_extension WHERE extname = 'vector';
+    IF ext_version IS NULL THEN
+        RAISE EXCEPTION 'vector 확장이 없다. 리비전 0001 이 CREATE EXTENSION vector 를 수행한다.';
+    END IF;
+    IF (
+        regexp_replace(split_part(ext_version, '.', 1), '[^0-9]', '', 'g')::int,
+        regexp_replace(split_part(ext_version, '.', 2), '[^0-9]', '', 'g')::int
+    ) < (0, 8) THEN
+        RAISE EXCEPTION
+            'pgvector % 은(는) 너무 낮다. 0.8.0 이상이 필요하다 (HNSW iterative_scan).',
+            ext_version;
+    END IF;
+END $$;
+"""
+
+
 def _require_pgvector() -> None:
+    if context.is_offline_mode():
+        op.execute(_PGVECTOR_GUARD_SQL)
+        return
+
     extversion = op.get_bind().scalar(
         sa.text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
     )

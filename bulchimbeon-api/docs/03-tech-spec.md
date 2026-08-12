@@ -478,3 +478,60 @@ uv run python scripts/seed.py
 - 에러 응답 포맷 통일: `{"error": {"code": "...", "message": "..."}}` — 코드 체계는 05-api-contract.md §1.4.
 - 성능 목표: 질문 접수 202 응답 < 500ms. **파이프라인 완료 지연은 M-1 캘리브레이션으로 확정**됐다(2026-08-07, n=8) — 🟢/🟡 경로 **25초**, 🔴 경로 **35초**. 산출 근거와 호출 방식 고정(`responses.parse`)은 `06 §0`.
   데드라인 초과 시에는 그 시점까지의 결과로 🟡 발행 + 카드 생성(안전망)으로 빠진다.
+
+## 9. 운영 DB (2026-08-12)
+
+### 9.1 요구 사항 — 타협 불가 두 가지
+
+| 항목 | 값 | 왜 |
+| --- | --- | --- |
+| PostgreSQL | **18** | 로컬·CI·배포를 하나로 통일했다 (`03 §1`). 15~17 도 동작하지만 검증 범위 밖이다 |
+| pgvector | **0.8.0 이상** | HNSW `iterative_scan` 이 여기서 들어왔다 |
+
+> ### ⛔ pgvector 0.7 대에서는 **조용히** 깨진다
+> HNSW 는 인덱스 스캔 **이후** `WHERE` 를 적용한다(post-filtering). 활성 버전 필터가 걸리면
+> top-k 가 0건이 될 수 있고, `iterative_scan` 이 그 보정 수단이다. 없으면 **인덱스는
+> 정상적으로 만들어지고 검색만 0건**이 된다 — 에러가 안 나므로 배포는 성공한 것처럼 보이고
+> 모든 질문이 근거 없음(🔴)으로 떨어진다. `sql/schema.sql` 이 이걸 직접 막는다.
+
+그 밖에 필요한 것은 표준 기능뿐이다: `gen_random_uuid()`(PG13+ 내장) · `clock_timestamp()` ·
+`jsonb` · 부분 인덱스. 확장은 `vector` 하나다.
+
+### 9.2 스키마 올리기
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f sql/schema.sql
+```
+
+- 전체가 **한 트랜잭션**이라 중간에 실패하면 아무것도 남지 않는다.
+- 끝에 `alembic_version = 0012` 가 기록되므로 이후 변경은 `alembic upgrade head` 로 이어진다.
+- ⚠️ `sql/schema.sql` 은 `alembic upgrade head --sql` 의 **출력**이다. 손으로 고치지 말고
+  마이그레이션을 고친 뒤 다시 생성한다.
+- 앱 컨테이너가 기동 시 `alembic upgrade head` 를 돌리는 구성이라면 이 파일 없이도 된다.
+  DB 를 DBA 가 따로 만드는 조직에서 쓰라고 있는 파일이다.
+
+### 9.3 어디에 띄울까
+
+`vector` 확장을 쓸 수 있는 매니지드 Postgres면 어디든 된다. 확인된 것들:
+
+| 후보 | pg18 | pgvector | 비고 |
+| --- | --- | --- | --- |
+| **Railway Postgres** | 18.4 | **0.8.6** | 현재 데모가 쓰는 곳. M-1 에서 확장 생성 권한까지 실증했다 |
+| Supabase | 15~17 | 0.8.x | pgvector 지원이 확실. pg18 은 확인 필요 |
+| Neon | 17 계열 | 0.8.x | 서버리스. 콜드 스타트가 SSE 연결과 어떻게 맞물리는지 확인 필요 |
+| AWS RDS / Aurora | 버전별 | **인스턴스마다 다름** | `SHOW rds.extensions` 로 pgvector 버전을 반드시 먼저 확인 |
+| GCP Cloud SQL | 버전별 | 버전별 | 위와 같음 |
+| 직접 운영 (docker) | `pgvector/pgvector:pg18` | 0.8.6 | 로컬·CI 와 완전히 같은 이미지 |
+
+**무엇을 고르든 띄우기 전에 이 세 줄로 확인하라.** 여기서 걸리면 그 DB 는 쓸 수 없다.
+
+```sql
+SELECT version();                                              -- PostgreSQL 18.x
+CREATE EXTENSION IF NOT EXISTS vector;                         -- 권한 확인
+SELECT extversion FROM pg_extension WHERE extname = 'vector';  -- 0.8.0 이상
+SET hnsw.iterative_scan = 'relaxed_order';                     -- 에러면 버전 부족
+```
+
+⚠️ **커넥션 수**를 함께 본다. 앱이 최대 `DB_POOL_SIZE + DB_MAX_OVERFLOW`(기본 20) 개를
+잡는다. 매니지드 DB 의 `max_connections` 가 그보다 빠듯하면(소형 인스턴스는 20~25 인
+경우가 있다) 풀 크기와 `PIPELINE_MAX_CONCURRENCY` 를 함께 줄여야 한다 (`03 §4.3`).

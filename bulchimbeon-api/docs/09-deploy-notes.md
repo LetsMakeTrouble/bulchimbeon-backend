@@ -388,3 +388,29 @@ Q2 `green` · Q8 `no_evidence` · Q7 `conflict` 셋 다 보존됐다.
 
 ⛔ **리허설을 하면 반드시 지워라.** Q8 을 확정하면 공식 Q&A 가 생기고, 그러면 발표 당일
 Q8 이 ② 재사용으로 빠져 🔴 시연이 통째로 사라진다.
+
+
+### 7.7 CORS 프론트 도메인 확정 (2026-08-12)
+
+프론트 도메인은 **`https://bulchimbeon.quanect.kr`** 이다.
+
+```bash
+railway variables --set "CORS_ORIGINS=https://bulchimbeon.quanect.kr,http://localhost:3000"
+```
+
+- `http://localhost:3000` 을 **남겨 둔다** — 프론트 팀의 로컬 개발이 그 오리진이다.
+- ⚠️ **스킴까지 정확히 적어야 한다.** `bulchimbeon.quanect.kr` 처럼 스킴이 없으면
+  브라우저가 보내는 `Origin` 헤더(`https://…`)와 문자열이 달라 조용히 차단된다.
+- 변수만 바꾸면 **재배포가 필요하다** — 앱이 기동 시점에 읽는다.
+  `railway variables --set` 은 기본적으로 재배포를 건다(`--skip-deploys` 로 끌 수 있다).
+
+확인 (2026-08-12 실측):
+
+| 오리진 | `access-control-allow-origin` |
+|---|---|
+| `https://bulchimbeon.quanect.kr` | 반환됨 ✓ |
+| `http://localhost:3000` | 반환됨 ✓ |
+| 목록 밖 오리진 | **없음** (차단) ✓ |
+
+`allow_credentials=True` 와 `allow_methods/headers=["*"]` 조합은 오리진이 와일드카드가
+아니라 **명시 목록**일 때만 안전하다. 목록을 `*` 로 바꾸지 마라.

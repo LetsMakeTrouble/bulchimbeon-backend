@@ -143,14 +143,26 @@ BULCHIMBEON = DemoProfile(
         ("backend-rules.md", "운영 규칙"),
         ("infra-deploy.md", "배포 구성"),
     ),
-    # 실측값 — `##` 섹션 6+3+6+5+4. 청킹 코드로 직접 세었다 (2026-08-16).
-    expected_chunks=24,
+    # 실측값 — `##` 섹션 7+3+6+6+4. 청킹 코드로 직접 세었다 (2026-08-16).
+    #
+    # ⚠️ 토큰 수명은 영어·한국어 문서 **양쪽에서 독립 섹션**이다. 큰 섹션 안에 한 문장으로
+    #    묻혀 있으면 청크가 희석돼 Q13(교차언어 충돌)이 `similarity_floor` 아래로 내려가고,
+    #    강제 🔴 사유가 `conflict` 가 아니라 `no_evidence` 가 된다 — 충돌 시연이 사라진다.
+    expected_chunks=26,
     canonical=bulchimbeon_questions.CANONICAL,
     by_key=bulchimbeon_questions.BY_KEY,
     history=bulchimbeon_questions.HISTORY,
     no_approval_keys=bulchimbeon_questions.NO_APPROVAL_KEYS,
     no_red_resolve_keys=bulchimbeon_questions.NO_RED_RESOLVE_KEYS,
     live_only_keys=bulchimbeon_questions.LIVE_ONLY_KEYS,
+    # ⚠️ 조정 없음 — **기본값 그대로**다.
+    #
+    # 한때 여기에 `similarity_floor` 0.325 를 넣었다. 한국어 문서를 영어 질의로만 찾던
+    # 시절의 보정이었는데, 검색이 언어별 축으로 바뀌면서(0013 · `retrieval.search_evidence`)
+    # 그 보정의 이유가 사라졌다. 같은 언어끼리 재면 유사도가 원래 대역으로 돌아온다.
+    #
+    # ⛔ 여기에 값을 다시 넣기 전에 `probe_seed_docs.py --profile bulchimbeon` 을 먼저 돌려라.
+    #    임계값을 낮추는 것은 검색이 실제로 못 찾을 때의 마지막 수단이다.
 )
 
 PROFILES: dict[str, DemoProfile] = {

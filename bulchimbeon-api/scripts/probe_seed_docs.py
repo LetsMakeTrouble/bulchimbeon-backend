@@ -62,9 +62,7 @@ async def _build_project(db: AsyncSession, answerer: User, profile: DemoProfile)
     return project
 
 
-async def _ingest(
-    db: AsyncSession, project: Project, uploader: User, profile: DemoProfile
-) -> None:
+async def _ingest(db: AsyncSession, project: Project, uploader: User, profile: DemoProfile) -> None:
     version_ids = []
     for filename, title in profile.documents:
         payload = (profile.seed_dir / filename).read_bytes()
@@ -138,7 +136,9 @@ async def main() -> None:
             print(f"측정 프로젝트: {project.name} ({project.id})")
             await _ingest(db, project, answerer, profile)
 
-    settings_map = dict(DEFAULT_SETTINGS)
+    # ⚠️ 프로필 조정을 얹는다. 안 얹으면 화면의 S·등급 하한이 **실제 시드와 다른 값**이 되어
+    #    "probe 는 통과했는데 시드는 🔴" 이 된다.
+    settings_map = {**DEFAULT_SETTINGS, **profile.settings_overrides}
     floor = float(settings_map["similarity_floor"])
 
     async with AsyncSessionLocal() as db:
@@ -148,7 +148,8 @@ async def main() -> None:
             .join(Document)
             .where(Document.project_id == project.id)
         )
-        print(f"청크 인제스트 완료 (첫 청크 {chunks})\n")
+        languages = await retrieval.project_languages(db, project.id)
+        print(f"청크 인제스트 완료 (첫 청크 {chunks}) · 코퍼스 언어 {languages}\n")
 
         header = f"{'키':<5}{'질문':<34}{'sim_raw':>9}{'S':>5}{'등급 하한':>10}"
         print(header)
@@ -161,11 +162,22 @@ async def main() -> None:
                 TranslationOut,
                 model=None,
             )
-            vector = (await get_provider().embed([translated["content_en"]]))[0]
+            # ⚠️ 파이프라인 ③ 과 **같은 축**으로 잰다. 영어 벡터 하나로만 재면 한국어
+            #    문서가 통째로 손해를 보는 옛 그림을 측정하게 되고, "probe 는 낮은데
+            #    시드는 멀쩡"(또는 그 반대)이 된다 (`retrieval.search_evidence`).
+            texts = {"en": translated["content_en"]}
+            if "ko" in languages:
+                texts["ko"] = question.content_ko  # 질문 원문 — 번역이 필요 없다.
+            vectors = await get_provider().embed(list(texts.values()))
+            query_embeddings = {
+                language: vector
+                for language, vector in zip(texts, vectors, strict=True)
+                if language in languages
+            }
             found = await retrieval.search_evidence(
                 db,
                 project_id=project.id,
-                query_embedding=vector,
+                query_embeddings=query_embeddings,
                 top_k=int(settings_map["retrieval_top_k"]),
             )
             if not found:

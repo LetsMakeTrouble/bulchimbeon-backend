@@ -149,3 +149,10 @@ class Chunk(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM_FIXED), nullable=False)
+
+    # `06 §2` ③ — 이 청크가 쓰인 언어. 질문을 **같은 언어로** 번역해 검색하기 위한 값이며
+    # 인제스트가 문자 체계로 판별해 채운다 (`app/utils/language.py`).
+    #
+    # ⚠️ `NULL` 은 0013 이전에 들어온 청크다. 검색은 이를 기본 언어로 취급한다 —
+    #    한국어 문서가 이미 있는 프로젝트는 재인제스트해야 효과를 본다.
+    language: Mapped[str | None] = mapped_column(Text, nullable=True)

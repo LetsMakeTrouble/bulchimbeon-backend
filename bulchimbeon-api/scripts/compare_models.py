@@ -40,6 +40,7 @@ from app.services.pipeline.llm_schemas import (  # noqa: E402
     TextOut,
     VerdictsOut,
 )
+from app.utils.language import DEFAULT_LANGUAGE  # noqa: E402
 
 MODELS = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
 
@@ -207,7 +208,7 @@ async def mode_answer(project_id: UUID) -> None:
             chunks = await retrieval.search_evidence(
                 db,
                 project_id=project_id,
-                query_embedding=vector,
+                query_embeddings={DEFAULT_LANGUAGE: vector},
                 top_k=DEFAULT_SETTINGS["retrieval_top_k"],
             )
             evidence_sets.append(chunks)

@@ -23,6 +23,20 @@ TRANSLATE_SYSTEM = (
     "that is blocked. This is a suggestion only — the asker decides."
 )
 
+# 프로젝트에 영어·질문자 언어 **말고 다른 언어**의 문서가 있을 때 쓴다 (`06 §2` ③).
+# 한국어 질문 → 그 언어로 옮겨 같은 언어끼리 검색하기 위한 것이며, 화면에 보이지 않는다.
+#
+# ⚠️ 스키마는 `TranslationOut` 을 그대로 쓴다(`content_en` 필드에 해당 언어 문장이 담긴다).
+#    필드명이 어긋나 보이지만 새 스키마를 만들면 ① 과 ③ 의 출력이 갈라지고, 이 문장은
+#    저장되지 않고 임베딩 입력으로만 쓰이므로 이름값이 밖으로 새지 않는다.
+SEARCH_TRANSLATE_SYSTEM = (
+    "You translate a question into {language} so it can be matched against documents "
+    "written in {language}.\n"
+    "- content_en: a faithful translation into {language}. Keep identifiers, code tokens, "
+    "and proper nouns exactly as they appear.\n"
+    "- suggest_urgent: always false. This translation is for search only."
+)
+
 SAME_QUESTION_SYSTEM = (
     "You decide whether two questions ask for the same fact.\n"
     "Answer same_question=true only when a single answer would fully satisfy both. "

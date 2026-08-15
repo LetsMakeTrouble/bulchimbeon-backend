@@ -46,17 +46,23 @@ _PIPELINE_ROOT = "답변 파이프라인"
 _RULES_ROOT = "운영 규칙"
 _DEPLOY_ROOT = "배포 구성"
 
-# 영어 근거 계열 — 검색 축과 언어가 같아 🟢 을 기대한다.
-_EN = (GRADE_GREEN,)
-# 한국어 근거 계열 — 교차언어라 🟡 도 사양대로다 (모듈 독스트링).
-_KO = (GRADE_GREEN, GRADE_YELLOW)
+# 기대 등급은 **언어가 아니라 실측**으로 나눈다 (`probe_seed_docs.py --profile bulchimbeon`,
+# 2026-08-16). 한국어 섹션에 영어 요약을 단 뒤로는 언어보다 섹션의 밀도가 더 크게 작동한다 —
+# Q4(영어 근거)가 S 94 인데 Q3·Q6(같은 영어 문서)은 72·73 이다.
+#
+# ⚠️ 여기를 실측과 어긋나게 두면 `report_grades` 가 매번 "기대 등급 밖" 을 찍는다.
+# 발표 전날 밤에 **없는 문제**를 쫓게 되는 자리다.
+# 실측(2026-08-16, 언어별 검색 축 · 기본 임계값): S 92~100 이 _GREEN, 59~78 이 _MIXED 다.
+# ⚠️ Q1 은 78 로 초록 하한(80) 바로 아래다 — 🟡 이 나오는 것이 사양대로다.
+_GREEN = (GRADE_GREEN,)
+_MIXED = (GRADE_GREEN, GRADE_YELLOW)
 
 
 CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q1",
         content_ko="SSE 스트림이 끊기면 클라이언트가 몇 초 뒤에 다시 붙나요?",
-        expected_grades=_EN,
+        expected_grades=_MIXED,
         evidence_doc=FRONTEND_GUIDE,
         evidence_heading=(_GUIDE_ROOT, "Live Updates over SSE"),
         note="3초. 릴리스 노트 v0.5 도 같은 값이라 두 근거가 일치한다 — 충돌이 아니다.",
@@ -64,7 +70,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q2",
         content_ko="VITE_API_BASE_URL 을 바꾸면 컨테이너만 다시 시작해도 반영되나요?",
-        expected_grades=_EN,
+        expected_grades=_GREEN,
         evidence_doc=FRONTEND_GUIDE,
         evidence_heading=(_GUIDE_ROOT, "Build-time Configuration"),
         note="아니다 — 빌드 시각에 번들로 박히므로 이미지를 다시 구워야 한다. 라이브 1단계 질문.",
@@ -72,7 +78,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q3",
         content_ko="assets 아래 번들 파일은 캐시를 어떻게 설정하나요?",
-        expected_grades=_EN,
+        expected_grades=_MIXED,
         evidence_doc=FRONTEND_GUIDE,
         evidence_heading=(_GUIDE_ROOT, "Static Serving and Caching"),
         note="파일명에 콘텐츠 해시가 있어 1년 immutable. index.html 은 no-cache 로 대비된다.",
@@ -80,7 +86,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q4",
         content_ko="담당자 확인 카드 인박스 화면의 경로가 무엇인가요?",
-        expected_grades=_EN,
+        expected_grades=_GREEN,
         evidence_doc=FRONTEND_GUIDE,
         evidence_heading=(_GUIDE_ROOT, "Routes and Screens"),
         note="`/inbox`. 경로 목록이 한 청크에 모여 있어 S 가 높게 나오는 계열이다.",
@@ -88,7 +94,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q5",
         content_ko="노란색 등급 답변은 질문자 화면에 어떻게 표시되나요?",
-        expected_grades=_EN,
+        expected_grades=_GREEN,
         evidence_doc=FRONTEND_GUIDE,
         evidence_heading=(_GUIDE_ROOT, "Grade Badges and Cross-check Controls"),
         note="답변은 주되 '담당자 확인 대기' 뱃지가 붙는다.",
@@ -96,7 +102,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q6",
         content_ko="문서의 새 버전을 활성화하면 이전 버전은 어떻게 되나요?",
-        expected_grades=_EN,
+        expected_grades=_MIXED,
         evidence_doc=RELEASE_NOTES,
         evidence_heading=(_NOTES_ROOT, "v0.3 — Document Shelf"),
         note="대체됨으로 표시되지만 계속 읽을 수 있다 — 옛 인용이 깨지지 않는다.",
@@ -104,7 +110,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q7",
         content_ko="답변의 매칭률은 검색 점수와 근거 충족도를 어떻게 조합해 계산하나요?",
-        expected_grades=_KO,
+        expected_grades=_MIXED,
         evidence_doc=BACKEND_PIPELINE,
         evidence_heading=(_PIPELINE_ROOT, "매칭률 계산"),
         note="min(S, G) — 평균이 아니다. 한국어 근거라 🟡 도 사양대로다.",
@@ -112,7 +118,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q8",
         content_ko="매칭률과 무관하게 무조건 보류로 떨어지는 조건에는 어떤 것들이 있나요?",
-        expected_grades=_KO,
+        expected_grades=_MIXED,
         evidence_doc=BACKEND_PIPELINE,
         evidence_heading=(_PIPELINE_ROOT, "강제 보류 네 가지"),
         note="conflict · no_evidence · schema_failed · quota_exceeded 넷. 방해금지에서도 유지된다.",
@@ -120,7 +126,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q9",
         content_ko="확정된 공식 Q&A 를 재사용할 때 한국어 원문을 다시 번역하나요?",
-        expected_grades=_KO,
+        expected_grades=_GREEN,
         evidence_doc=BACKEND_PIPELINE,
         evidence_heading=(_PIPELINE_ROOT, "재사용 판정"),
         note="재번역하지 않는다 — 승인된 문장이 매번 달라지면 안 되기 때문이다.",
@@ -128,7 +134,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q10",
         content_ko="방해금지 시간과 브리핑 시각은 누구의 타임존을 기준으로 판정하나요?",
-        expected_grades=_KO,
+        expected_grades=_MIXED,
         evidence_doc=BACKEND_RULES,
         evidence_heading=(_RULES_ROOT, "알림과 방해금지"),
         note="담당자 계정의 타임존. 프로젝트 설정에 타임존 키는 없다.",
@@ -136,7 +142,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q11",
         content_ko="앞단 터널은 /api 로 시작하는 요청을 어디로 보내나요?",
-        expected_grades=_KO,
+        expected_grades=_MIXED,
         evidence_doc=INFRA_DEPLOY,
         evidence_heading=(_DEPLOY_ROOT, "앞단 라우팅"),
         note="API 컨테이너 8000 포트. 나머지는 웹 8080 — 같은 오리진이라 CORS 를 타지 않는다.",
@@ -144,7 +150,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q12",
         content_ko="백업은 어떤 볼륨들을 함께 받아야 하나요?",
-        expected_grades=_KO,
+        expected_grades=_MIXED,
         evidence_doc=INFRA_DEPLOY,
         evidence_heading=(_DEPLOY_ROOT, "데이터와 백업"),
         note="DB 볼륨과 스토리지 볼륨 둘 다. DB 만 받으면 원본 파일이 복구되지 않는다.",
@@ -230,13 +236,13 @@ HISTORY: tuple[HistoryQuestion, ...] = (
         "알림 스트림은 세션당 몇 개를 여나요?",
         "탭을 두 개 열면 SSE 스트림도 두 개가 되나요?",
         "SSE 스트림 앞단에서 버퍼링을 하면 어떻게 되나요?",
-        "답변 완료를 폴링으로 확인하나요 SSE 로 받나요?",
-        "SSE 스트림이 끊긴 동안 마운트된 화면은 무엇을 보여 주나요?",
-        "실시간 알림을 받으려면 화면마다 따로 구독해야 하나요?",
-        "SSE 재구독은 클라이언트가 자동으로 하나요?",
     ),
     *_family(
         "Q2",
+        "프론트 환경변수는 언제 값이 확정되나요?",
+        "API 주소를 바꾸려면 무엇을 다시 해야 하나요?",
+        "빌드된 번들 안에 API 경로가 들어 있나요?",
+        "환경변수를 고쳤는데 화면이 그대로면 무엇을 확인해야 하나요?",
         "API 주소 환경변수는 빌드 시각에 박히나요 런타임에 읽히나요?",
         "프론트 API 베이스 URL 을 바꾸면 이미지를 다시 빌드해야 하나요?",
         "VITE_API_BASE_URL 값이 같은 오리진 구성에서는 무엇인가요?",
@@ -253,13 +259,13 @@ HISTORY: tuple[HistoryQuestion, ...] = (
         "index.html 은 왜 캐시하지 않나요?",
         "assets 경로의 파일명에 해시가 붙는 이유가 무엇인가요?",
         "없는 번들 파일을 요청하면 index.html 로 폴백하나요?",
-        "SPA 라우팅을 위해 어떤 경로가 index.html 로 폴백되나요?",
-        "정적 파일 서빙에 어떤 웹서버를 쓰고 포트가 몇 번인가요?",
-        "번들 캐시를 1년으로 두어도 배포가 반영되나요?",
-        "index.html 캐시 정책이 no-cache 인 이유가 무엇인가요?",
     ),
     *_family(
         "Q4",
+        "확인 카드를 처리하는 화면 주소가 어떻게 되나요?",
+        "담당자 전용 화면은 어떤 경로들인가요?",
+        "알림 목록 화면의 경로가 무엇인가요?",
+        "설정 화면 경로를 알려주세요.",
         "질문 목록 화면의 경로가 무엇인가요?",
         "문서함 화면 경로를 알려주세요.",
         "지표 대시보드 화면의 경로가 무엇인가요?",
@@ -272,6 +278,10 @@ HISTORY: tuple[HistoryQuestion, ...] = (
     ),
     *_family(
         "Q5",
+        "확인 대기 상태의 답변은 어떻게 보이나요?",
+        "답변에 붙는 뱃지에는 어떤 종류가 있나요?",
+        "질문자는 답변이 확정된 것인지 어떻게 구분하나요?",
+        "근거 인용은 어느 등급에서 펼쳐지나요?",
         "빨간 등급 답변도 질문자 화면에 발행되나요?",
         "초록 등급 답변은 인용을 어떻게 보여 주나요?",
         "확인 대기 뱃지는 어떤 등급에 붙나요?",
@@ -287,10 +297,6 @@ HISTORY: tuple[HistoryQuestion, ...] = (
         "문서 버전이 거치는 상태에는 어떤 것들이 있나요?",
         "인제스트가 실패한 문서 버전은 화면에 어떻게 표시되나요?",
         "준비되지 않은 문서 버전도 활성화할 수 있나요?",
-        "확인 카드 큐는 어떤 순서로 정렬되나요?",
-        "인박스에서 키보드로 카드를 넘길 수 있나요?",
-        "대체된 문서 버전을 가리키는 인용은 열리나요?",
-        "크로스체크를 두 번 누르면 어떻게 되나요?",
     ),
     *_family(
         "Q7",
@@ -314,6 +320,10 @@ HISTORY: tuple[HistoryQuestion, ...] = (
     ),
     *_family(
         "Q9",
+        "재사용된 답변의 문장은 새로 만들어지나요?",
+        "공식 Q&A 를 다시 쓰면 번역이 다시 도나요?",
+        "확정 답변을 재사용할 때 원문이 바뀌나요?",
+        "재사용 답변에도 확인 카드가 생기나요?",
         "공식 Q&A 재사용 판정선 설정 키 이름이 무엇인가요?",
         "재사용된 답변도 확인 카드를 만드나요?",
         "재사용 답변은 어떤 상태로 시작하나요?",
@@ -334,10 +344,6 @@ HISTORY: tuple[HistoryQuestion, ...] = (
         "Q11",
         "프론트 nginx 에 API 프록시 블록을 두나요?",
         "터널 라우팅에서 API 가 아닌 경로는 어디로 가나요?",
-        "프론트와 API 가 같은 오리진이면 CORS 를 타나요?",
-        "터널의 /api 라우팅 규칙이 빠지면 어떤 증상이 나오나요?",
-        "API 프록시를 한 번 더 두면 무엇이 문제가 되나요?",
-        "로그인 요청이 정적 서버에 닿으면 어떤 상태코드를 받나요?",
     ),
     *_family(
         "Q12",

@@ -9,13 +9,17 @@ digest, `/official-qa` for confirmed knowledge, `/metrics` for the accuracy dash
 `/members` for member and role management, `/settings` for project settings, and
 `/notifications` for the notification list. Unknown paths redirect to `/`.
 
+## Token Lifetimes
+The access token is valid for 30 minutes. The refresh token is valid for 14 days. Once the
+access token passes that lifetime the client must refresh it before the next request.
+
 ## Authentication and Token Handling
 Login posts an email and password to `POST /api/v1/auth/login` and receives an access token
-and a refresh token. The access token is valid for 30 minutes and the refresh token for
-14 days. Every authenticated request carries `Authorization: Bearer <access token>`. When a
-request comes back `401`, the client calls `POST /api/v1/auth/refresh` once with the refresh
-token and replays the original request. If that refresh also fails, the client clears the
-stored session and routes the user back to `/login`. The client never stores the password.
+and a refresh token. Every authenticated request carries `Authorization: Bearer <access
+token>`. When a request comes back `401`, the client calls `POST /api/v1/auth/refresh` once
+with the refresh token and replays the original request. If that refresh also fails, the
+client clears the stored session and routes the user back to `/login`. The client never
+stores the password.
 
 ## Live Updates over SSE
 Notifications, answer completion, and review-card arrival reach the client over a single

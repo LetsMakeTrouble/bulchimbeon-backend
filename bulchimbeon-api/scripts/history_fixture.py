@@ -177,8 +177,10 @@ def _select_for(model: type, project_id: UUID) -> Any:
     if PROJECT_COLUMN in model.__table__.columns:
         stmt = select(model).where(model.project_id == project_id)
     elif model is Answer:
-        stmt = select(model).join(Question, Question.id == Answer.question_id).where(
-            Question.project_id == project_id
+        stmt = (
+            select(model)
+            .join(Question, Question.id == Answer.question_id)
+            .where(Question.project_id == project_id)
         )
     elif model is AnswerCitation:
         stmt = (
@@ -309,9 +311,7 @@ async def load(db: AsyncSession, profile: DemoProfile, project: Project, path: P
     chunks = {key: chunk_id for chunk_id, key in (await _chunk_keys(db, project.id)).items()}
 
     # id 를 먼저 전부 배정한다 — 그러면 참조 해석에 순서 문제가 없다.
-    ids = {
-        f"{key}:{index}": uuid4() for key, items in rows.items() for index in range(len(items))
-    }
+    ids = {f"{key}:{index}": uuid4() for key, items in rows.items() for index in range(len(items))}
     now = datetime.now().astimezone()
     deferred: list[tuple[Any, str, UUID]] = []
     planted = 0
@@ -338,9 +338,7 @@ async def load(db: AsyncSession, profile: DemoProfile, project: Project, path: P
             for name, raw_value in row.items():
                 if name in cyclic:
                     continue  # 아래에서 따로 채운다.
-                values[name] = _resolve(
-                    raw_value, ids=ids, users=users, chunks=chunks, now=now
-                )
+                values[name] = _resolve(raw_value, ids=ids, users=users, chunks=chunks, now=now)
 
             if model is OfficialQA:
                 values["question_embedding"] = official_vectors[index]

@@ -616,8 +616,7 @@ async def resolve_red_cards(
         resolved += 1
 
     log(
-        f"· 🔴 카드 {resolved}건 확정 "
-        f"(제외 계열: {', '.join(sorted(profile.no_red_resolve_keys))})"
+        f"· 🔴 카드 {resolved}건 확정 (제외 계열: {', '.join(sorted(profile.no_red_resolve_keys))})"
     )
     return resolved
 

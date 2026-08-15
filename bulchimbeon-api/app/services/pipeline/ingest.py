@@ -32,6 +32,7 @@ from app.models.project import Project
 from app.services import document_service, sse_manager
 from app.services.llm import get_provider
 from app.utils.chunking import ChunkDraft, chunk_pages
+from app.utils.language import detect as detect_language
 from app.utils.parsing import DocumentParseError, parse_file
 from app.utils.storage import resolve_storage_path
 
@@ -177,6 +178,9 @@ async def _ingest(
                 content=draft.content,
                 meta=draft.to_meta(),
                 embedding=embedding,
+                # 임베딩에 넣은 것과 **같은 텍스트**로 판별한다 — 헤딩 줄이 붙은 `content` 로
+                # 재면 영문 제목 한 줄 때문에 한국어 본문이 `en` 으로 기울 수 있다.
+                language=detect_language(draft.embedding_content or draft.content),
             )
         )
 

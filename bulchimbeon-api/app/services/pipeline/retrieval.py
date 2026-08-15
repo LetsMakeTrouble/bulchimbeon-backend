@@ -32,6 +32,7 @@ from app.models.document import (
     DocumentVersion,
 )
 from app.models.official_qa import OFFICIAL_QA_STATUS_ACTIVE, OfficialQA
+from app.utils.language import DEFAULT_LANGUAGE
 
 
 def active_versions_query(project_id: UUID) -> Select[tuple[UUID]]:
@@ -99,8 +100,30 @@ async def _apply_hnsw_settings(db: AsyncSession, ef_search: int) -> None:
     await db.execute(text(f"SET LOCAL hnsw.ef_search = {int(ef_search)}"))
 
 
+async def project_languages(db: AsyncSession, project_id: UUID) -> list[str]:
+    """이 프로젝트의 **검색 대상 청크에 실제로 있는** 언어들.
+
+    ⚠️ `projects.settings` 에 목록을 따로 두지 않는다. 설정 키는 계약서(`05 §3`)가 16개로
+    닫아 두었고, 무엇보다 **문서를 올릴 때마다 목록이 어긋날 자리**가 생긴다. 청크에서
+    끌어내면 업로드·삭제·버전 교체를 자동으로 따라간다.
+
+    `NULL`(0013 이전 청크)은 기본 언어로 접는다.
+    """
+    rows = await db.scalars(
+        select(Chunk.language)
+        .where(Chunk.document_version_id.in_(active_versions_query(project_id)))
+        .distinct()
+    )
+    found = {row or DEFAULT_LANGUAGE for row in rows}
+    return sorted(found) if found else [DEFAULT_LANGUAGE]
+
+
 async def _run_search(
-    db: AsyncSession, project_id: UUID, query_embedding: list[float], top_k: int
+    db: AsyncSession,
+    project_id: UUID,
+    query_embedding: list[float],
+    top_k: int,
+    language: str | None = None,
 ) -> list[EvidenceChunk]:
     distance = Chunk.embedding.cosine_distance(query_embedding)
 
@@ -122,6 +145,14 @@ async def _run_search(
         .order_by(distance)  # 거리 오름차순 = 유사도 내림차순
         .limit(top_k)
     )
+    if language is not None:
+        # 기본 언어는 `NULL`(0013 이전 청크)도 함께 본다 — 마이그레이션 직후에도 검색이
+        # 비지 않게 하기 위해서다.
+        stmt = stmt.where(
+            Chunk.language.is_(None) | (Chunk.language == language)
+            if language == DEFAULT_LANGUAGE
+            else Chunk.language == language
+        )
 
     rows = (await db.execute(stmt)).all()
     return [
@@ -140,21 +171,44 @@ async def _run_search(
 
 
 async def search_evidence(
-    db: AsyncSession, *, project_id: UUID, query_embedding: list[float], top_k: int
+    db: AsyncSession,
+    *,
+    project_id: UUID,
+    query_embeddings: dict[str, list[float]],
+    top_k: int,
 ) -> list[EvidenceChunk]:
-    """③ 근거 검색 — 활성 버전 청크만, `retrieval_top_k` 건 (`06 §2` ③).
+    """③ 근거 검색 — **언어별로 같은 언어끼리** 재고 합친다 (`06 §2` ③).
+
+    `query_embeddings` 는 `{언어: 그 언어로 번역한 질문의 임베딩}` 이다. 한국어 문서는
+    한국어 질의로, 영어 문서는 영어 질의로 잰다 — 임베딩은 같은 언어끼리 비교할 때 가장
+    정확하고, 축이 하나뿐이면 반대쪽 언어가 통째로 손해를 본다.
+
+    실측(2026-08-16): 한국어 청크를 영어 질의로 찾을 때 0.1914 였던 질문이 있다.
+    `similarity_floor`(0.444) 아래라 강제 🔴 `no_evidence` 였는데, 청크 본문은 질문과
+    거의 같은 문장이었다.
+
+    ⛔ **언어별 결과를 sim 으로 그냥 합친다.** 같은 모델·같은 축이라 비교가 성립한다.
+    언어마다 top_k 를 뽑아 합친 뒤 다시 top_k 로 자르므로, 한 언어가 좋은 근거를 독점하면
+    그 언어가 자리를 다 가져간다 — 균등 배분하지 않는 것이 의도다. 근거는 언어가 아니라
+    유사도로 뽑아야 한다.
 
     **0건 처리 순서**: 결과 0건 → `ef_search` 를 올려 **재조회 1회** → 그래도 0건일 때만
     호출자가 `no_evidence` 로 확정한다. 재조회 없이 곧바로 확정하면 HNSW post-filtering 때문에
     "문서는 있는데 근거가 없다"는 오판이 난다.
     """
-    await _apply_hnsw_settings(db, _EF_SEARCH_FIRST)
-    found = await _run_search(db, project_id, query_embedding, top_k)
-    if found:
-        return found
+    if not query_embeddings:
+        return []
 
-    await _apply_hnsw_settings(db, _EF_SEARCH_RETRY)
-    return await _run_search(db, project_id, query_embedding, top_k)
+    for ef_search in (_EF_SEARCH_FIRST, _EF_SEARCH_RETRY):
+        await _apply_hnsw_settings(db, ef_search)
+        merged: list[EvidenceChunk] = []
+        for language, embedding in query_embeddings.items():
+            merged.extend(await _run_search(db, project_id, embedding, top_k, language))
+        if merged:
+            merged.sort(key=lambda chunk: chunk.sim_raw, reverse=True)
+            return merged[:top_k]
+
+    return []
 
 
 async def search_official_qa(

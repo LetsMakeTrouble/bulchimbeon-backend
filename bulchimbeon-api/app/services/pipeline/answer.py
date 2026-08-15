@@ -72,6 +72,7 @@ from app.services.pipeline.llm_schemas import (
     VerdictsOut,
 )
 from app.services.pipeline.retrieval import EvidenceChunk
+from app.utils.language import DEFAULT_LANGUAGE
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +165,63 @@ class _Ctx:
 # --------------------------------------------------------------------------------------
 # 진입점
 # --------------------------------------------------------------------------------------
+
+# 질문 원문의 언어. `questions.content_ko` 라는 컬럼명이 이 전제를 이미 담고 있다
+# (`05 §5` — 질문은 한국어로 접수된다).
+QUESTION_LANGUAGE = "ko"
+
+
+async def _search_embeddings(
+    ctx: Any,
+    db: AsyncSession,
+    project: Project,
+    question: Question,
+    english_embedding: list[float],
+) -> dict[str, list[float]]:
+    """③ 이 쓸 `{언어: 질의 임베딩}` — **프로젝트에 실제로 있는 언어만** 만든다.
+
+    임베딩은 같은 언어끼리 비교할 때 가장 정확하다. 축이 영어 하나뿐이면 한국어 문서가
+    통째로 손해를 본다 — 실측(2026-08-16)에서 뜻이 거의 같은 질문·청크 쌍이 0.1914 였고
+    `similarity_floor` 에 걸려 강제 🔴 `no_evidence` 가 됐다.
+
+    ### 비용은 거의 늘지 않는다
+    질문자 언어(`ko`)는 **번역이 필요 없다** — 원문을 그대로 임베딩한다. 영어 벡터는 ② 가
+    이미 만들어 둔 것을 그대로 쓴다. 그래서 한국어·영어 프로젝트에서 늘어나는 것은
+    **임베딩 1회**뿐이고 LLM 호출은 그대로다. 두 언어 밖(일본어 등)이 섞여 있을 때만
+    그 언어 수만큼 번역이 붙는다.
+
+    ⚠️ ② 재사용 판정은 계속 **영어 축**이다 (`official_qas.question_embedding` 이 영어로
+    임베딩돼 있다). 여기서 만드는 벡터는 ③ 근거 검색 전용이다.
+    """
+    languages = await retrieval.project_languages(db, project.id)
+
+    pending: dict[str, str] = {}
+    for language in languages:
+        if language == DEFAULT_LANGUAGE:
+            continue  # ② 가 만든 영어 벡터를 그대로 쓴다.
+        if language == QUESTION_LANGUAGE:
+            pending[language] = question.content_ko  # 번역 없이 원문 그대로.
+            continue
+        translated = await ctx.call_json(
+            step="translate",
+            system=prompts.SEARCH_TRANSLATE_SYSTEM.format(language=language),
+            user=question.content_ko,
+            schema=TranslationOut,
+            model=env_settings.llm_model_translate,
+        )
+        pending[language] = translated["content_en"]
+
+    embeddings: dict[str, list[float]] = {}
+    if DEFAULT_LANGUAGE in languages:
+        embeddings[DEFAULT_LANGUAGE] = english_embedding
+    if pending:
+        vectors = await get_provider().embed(list(pending.values()))
+        embeddings.update(zip(pending, vectors, strict=True))
+
+    # 언어를 하나도 못 찾는 경우(청크 0건)는 호출자가 `no_evidence` 로 처리한다.
+    return embeddings or {DEFAULT_LANGUAGE: english_embedding}
+
+
 async def run_answer_pipeline(question_id: UUID) -> None:
     """백그라운드 진입점. **UUID 하나만** 받는다 (`03 §2` 원칙 4).
 
@@ -357,10 +415,11 @@ async def _pipeline(db: AsyncSession, question_id: UUID) -> _Outcome | None:
 
     # --- ③ 근거 검색 -----------------------------------------------------------------
     _guard_deadline(ctx, "retrieval")
+    query_embeddings = await _search_embeddings(ctx, db, project, question, query_embedding)
     evidence = await retrieval.search_evidence(
         db,
         project_id=project.id,
-        query_embedding=query_embedding,
+        query_embeddings=query_embeddings,
         top_k=int(ctx.setting("retrieval_top_k")),
     )
     if not evidence:

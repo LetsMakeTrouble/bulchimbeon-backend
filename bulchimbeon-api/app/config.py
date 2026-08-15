@@ -147,7 +147,27 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 45
     llm_pipeline_deadline_seconds: int = 25  # 🟢/🟡 경로
     llm_pipeline_deadline_red_seconds: int = 35  # 🔴 경로 (⑦구조화 1회 추가)
-    embedding_model: str = "text-embedding-3-small"
+    # ⚠️ **`-large` 를 1536차원으로 잘라 받는다.** `dimensions` 파라미터를 주면 OpenAI 가
+    #    앞쪽 차원만 돌려주므로(Matryoshka) `vector(1536)` 컬럼을 그대로 쓸 수 있다 —
+    #    마이그레이션도 재설계도 없다.
+    #
+    # 실측 2026-08-16 (한국어 청크 16개 · 질문 54건, `scratchpad/embed_models.py`):
+    #
+    #   모델                          정확도@1   겹침    🟢 도달   차단선 미달
+    #   small                          75.5%    0.245     6건        9건
+    #   large (3072)                   91.8%    0.146    10건        8건
+    #   large (1536 절단)              91.8%    0.144    13건        7건
+    #
+    # 이득은 **점수의 크기가 아니라 순위**다 — 중앙값은 0.530 → 0.540 으로 거의 그대로인데,
+    # 엉뚱한 청크를 1위로 올리는 비율이 24.5% → 8.2% 로 줄었고 "근거 없음" 질문이 잘못
+    # 걸리는 최고값도 0.514 → 0.480 으로 내려왔다. 자른 쪽이 3072 보다 나은 것은 표본
+    # 크기(54건) 안의 차이라 우열로 읽지 말 것 — **같다고 보고, 스키마를 안 바꾸는 쪽을
+    # 고른 것**이다.
+    #
+    # ⛔ **모델을 바꾸면 기존 청크를 전부 다시 임베딩해야 한다.** 두 모델의 벡터는 같은
+    #    공간이 아니라서 섞이면 검색이 조용히 무너진다 (옛 청크가 영원히 안 걸리거나
+    #    엉뚱하게 걸린다). 데모는 `seed.py --reset`, 운영은 전체 문서 재인제스트다.
+    embedding_model: str = "text-embedding-3-large"
     embedding_dim: int = EMBEDDING_DIM_FIXED
 
     # Storage

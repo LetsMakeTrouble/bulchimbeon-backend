@@ -23,6 +23,9 @@ PRICE_PER_MILLION: dict[str, tuple[str, str]] = {
     "gpt-5.6-terra": ("2.50", "15.00"),
     "gpt-5.6-luna": ("0.20", "1.20"),
     "text-embedding-3-small": ("0.02", "0.00"),
+    # 기본 임베딩 모델 (`config.embedding_model`). small 의 6.5배지만 절대값이 작다 —
+    # 문서 26청크 + 질문당 1~2회라 이력 109건을 돌려도 1센트 단위다.
+    "text-embedding-3-large": ("0.13", "0.00"),
 }
 
 _MILLION = Decimal(1_000_000)

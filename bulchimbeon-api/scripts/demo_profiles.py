@@ -104,7 +104,10 @@ GLOBALMART = DemoProfile(
         ("integration-guide.md", "Integration Guide"),
         ("meeting-notes-2026-07.md", "Partner Sync Notes — July 2026"),
     ),
-    expected_chunks=23,
+    # ⚠️ 23 → 95. 청킹 2차 분할(`MAX_UNITS_PER_CHUNK`)이 들어오면서 섹션 하나가 문장
+    #    3개씩 창으로 나뉜다. **M-1 캘리브레이션은 23청크 시절 값이므로** 임계값이 여전히
+    #    맞는지는 `eval_questions.py` 로 확인한다.
+    expected_chunks=95,
     canonical=demo_questions.CANONICAL,
     by_key=demo_questions.BY_KEY,
     history=demo_questions.HISTORY,
@@ -148,7 +151,7 @@ BULCHIMBEON = DemoProfile(
     # ⚠️ 토큰 수명은 영어·한국어 문서 **양쪽에서 독립 섹션**이다. 큰 섹션 안에 한 문장으로
     #    묻혀 있으면 청크가 희석돼 Q13(교차언어 충돌)이 `similarity_floor` 아래로 내려가고,
     #    강제 🔴 사유가 `conflict` 가 아니라 `no_evidence` 가 된다 — 충돌 시연이 사라진다.
-    expected_chunks=26,
+    expected_chunks=108,
     canonical=bulchimbeon_questions.CANONICAL,
     by_key=bulchimbeon_questions.BY_KEY,
     history=bulchimbeon_questions.HISTORY,

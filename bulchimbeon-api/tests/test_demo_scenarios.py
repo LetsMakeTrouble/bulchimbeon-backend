@@ -160,21 +160,27 @@ async def team(client: AsyncClient) -> Team:
     return await build_team(client, "demo-scenarios.test")
 
 
-def test_seed_corpus_is_23_chunks() -> None:
-    """`08 §2` — `##` 섹션 하나가 청크 하나 (11 + 5 + 5 + 2).
+def test_seed_corpus_chunk_layout() -> None:
+    """`08 §2` — `##` 섹션을 다시 **문장 3개씩** 창으로 나눈 결과 (47 + 21 + 24 + 3).
 
     청크 수가 `retrieval_top_k`(6)보다 적으면 검색이 "전부 반환"으로 퇴화하는데도 파이프라인은
     초록으로 돈다 — 조용히 깨지는 실패 모드라 여기서 못박는다 (`08 §5`).
     ⚠️ 제목 줄만 있는 섹션은 청크가 아니다 (`utils/chunking._has_prose`).
+
+    ⚠️ **23 → 95 로 바뀐 것은 `MAX_UNITS_PER_CHUNK` 2차 분할 때문이다** (2026-08-16).
+    섹션 하나가 사실을 여럿 담고 있으면 그중 하나만 묻는 질문이 희석되던 문제를 고친 것이며,
+    실측으로 차단선 미달이 26 → 8건, 🟢 대역 도달이 32 → 66건이 됐다.
+    이 숫자가 다시 틀리면 청킹 규칙이 바뀐 것이다 — 바꿀 의도였다면 여기도 함께 고치고,
+    아니라면 `utils/chunking` 을 보라.
     """
     corpus = seed_corpus()
     assert len(corpus) == EXPECTED_CHUNK_COUNT
 
     assert Counter(chunk.doc_filename for chunk in corpus) == {
-        "api-spec.md": 11,
-        "refund-policy.md": 5,
-        "integration-guide.md": 5,
-        "meeting-notes-2026-07.md": 2,
+        "api-spec.md": 47,
+        "refund-policy.md": 21,
+        "integration-guide.md": 24,
+        "meeting-notes-2026-07.md": 3,
     }
     # 모든 청크가 `H1 > H2` 두 단계 경로를 갖는다 — 빵부스러기가 화면에 그대로 찍힌다 (`05 §6`).
     assert all(len(chunk.heading_path) == 2 for chunk in corpus)

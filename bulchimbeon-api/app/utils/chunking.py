@@ -13,12 +13,28 @@ from dataclasses import dataclass, field
 
 from app.utils.parsing import ParsedPage
 
-# `06 §1` ② — 800토큰 초과 시 분할, 오버랩 15%.
+# `06 §1` ② — 800토큰 초과 시 분할, 오버랩 15%. **바깥 상한**이다.
 MAX_CHUNK_TOKENS = 800
 OVERLAP_RATIO = 0.15
 
+# 2차 분할 (`_split_section`) — 한 청크가 담는 **문장(또는 목록 항목) 수** 상한.
+#
+# ⚠️ 토큰이 아니라 문장 수로 잡는다. 토큰 추정은 영문 경험칙(4자≈1토큰)이라 한국어를
+#    크게 과소평가해서, 토큰 목표로 자르면 **영어 섹션만 쪼개지고 한국어는 통째로 남는다.**
+#    희석을 만드는 것은 바이트가 아니라 "한 청크에 든 사실의 개수"이므로 문장 수가 맞다.
+#
+# ⚠️ 키우면 사실 여럿이 한 청크로 뭉쳐 단일 항목 질문이 희석되고, 줄이면 문장이 잘게
+#    흩어져 ④ 가 근거를 이어 붙이지 못한다. 바꿨으면 `probe_seed_docs.py --history` 로
+#    차단선 미달 건수를 다시 재라.
+MAX_UNITS_PER_CHUNK = 3
+
 # 영문 경험칙. 실제보다 토큰을 적게 잡으면 상한을 넘기므로 나눗셈 쪽을 작게 잡는다.
 CHARS_PER_TOKEN = 4
+
+# 목록 항목(`- `, `* `, `1. `)은 한 줄이 한 단위다.
+_LIST_ITEM_PATTERN = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+# 문장 경계 — 마침표·물음표·느낌표 뒤의 공백. 한국어 문장도 마침표로 끝난다.
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 _HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 
@@ -72,7 +88,7 @@ def chunk_pages(pages: list[ParsedPage]) -> list[ChunkDraft]:
             # ⚠️ `content` 는 **종전 그대로** 둔다 (헤딩 줄 포함, 오버랩 경계도 그대로).
             #    달라지는 것은 `embedding_content` 하나뿐이다.
             heading_line = _leading_heading(section_text)
-            for body in _split_with_overlap(section_text):
+            for body in _split_section(section_text, heading_line):
                 chunks.append(
                     ChunkDraft(
                         content=body,
@@ -169,6 +185,75 @@ def _split_by_headings(text: str, heading_stack: list[str]) -> list[tuple[str, l
 
     flush()
     return sections
+
+
+def _split_section(section_text: str, heading_line: str) -> list[str]:
+    """섹션을 청크 본문들로 나눈다 — **바깥 상한 → 안쪽 목표** 두 겹이다.
+
+    바깥은 종전 그대로 `MAX_CHUNK_TOKENS`(800) 하드 상한이고, 안쪽이 이번에 더한
+    `TARGET_CHUNK_TOKENS` 목표 분할이다.
+
+    ### 왜 한 겹 더 나누나 (실측 2026-08-16)
+    섹션 하나가 사실을 여럿 담고 있으면, 그중 **하나만 묻는 질문이 나머지에 희석된다.**
+    화면 경로 12개가 한 문단에 있는 코퍼스에서 "설정 화면 경로"를 물었을 때 0.336 이
+    나왔다 — 답이 그 문단 안에 있는데도 `similarity_floor`(0.444)에 걸렸다.
+    같은 코퍼스에서 토큰 수명 한 문장을 **독립 섹션으로 빼자 0.42 → 0.77** 이 됐다.
+    그때는 사람이 문서를 고쳐서 얻은 효과였고, 이 함수는 그것을 자동으로 한다.
+
+    ⛔ **문서를 고치라고 요구하지 않는다.** "검색이 잘 되게 문서를 쪼개 두세요"는 이
+    제품이 없애려는 종류의 숙제다. 쪼개는 일은 우리가 한다.
+    """
+    pieces: list[str] = []
+    for piece in _split_with_overlap(section_text):
+        pieces.extend(_pack_units(piece, heading_line))
+    return pieces
+
+
+def _units(body: str) -> list[str]:
+    """분할 단위 — 목록 항목은 한 줄이 하나, 산문은 문장 하나.
+
+    ⚠️ 문장 경계는 마침표·물음표·느낌표 뒤의 공백이다. 한국어 문장도 마침표로 끝나므로
+    같은 규칙으로 잘린다. 헤딩 줄은 단위에서 뺀다 — 창마다 다시 붙일 것이기 때문이다.
+    """
+    units: list[str] = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped or _HEADING_PATTERN.match(line):
+            continue
+        if _LIST_ITEM_PATTERN.match(stripped):
+            units.append(stripped)
+            continue
+        units.extend(part.strip() for part in _SENTENCE_END.split(stripped) if part.strip())
+    return units
+
+
+def _pack_units(piece: str, heading_line: str) -> list[str]:
+    """단위를 `TARGET_CHUNK_TOKENS` 안쪽 창으로 묶는다. 창 사이는 한 단위 겹친다.
+
+    ⚠️ **헤딩 줄을 창마다 앞에 붙인다.** 청크만 읽는 LLM 이 "무엇에 대한 문단인지" 알아야
+    근거로 쓸 수 있고(`06 §2` ④), 화면 빵부스러기도 여기서 나온다. 임베딩 입력에서는
+    그 줄이 다시 걷힌다 (`_embedding_body`) — 종전 규칙 그대로다.
+    """
+    units = _units(piece)
+    if not units:
+        return [piece]
+
+    windows: list[list[str]] = []
+    current: list[str] = []
+    for unit in units:
+        if len(current) >= MAX_UNITS_PER_CHUNK:
+            windows.append(current)
+            # 경계에 걸친 문장이 어느 창에서도 온전히 검색되지 않는 것을 막는다.
+            current = [current[-1]]
+        current.append(unit)
+    if current:
+        windows.append(current)
+
+    if len(windows) <= 1:
+        return [piece]  # 목표 안쪽이면 종전 그대로 둔다 (불필요한 변형 금지).
+
+    prefix = f"{heading_line}\n" if heading_line else ""
+    return [prefix + "\n".join(window) for window in windows]
 
 
 def _split_with_overlap(text: str) -> list[str]:

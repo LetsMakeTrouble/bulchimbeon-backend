@@ -88,9 +88,7 @@ def test_live_only_originals_are_not_in_history(profile: DemoProfile) -> None:
     **원문 문장**이 들어간 것만 문제다.
     """
     live_texts = {
-        profile.by_key[key].content_ko
-        for key in profile.live_only_keys
-        if key in profile.by_key
+        profile.by_key[key].content_ko for key in profile.live_only_keys if key in profile.by_key
     }
     planted = {item.content_ko for item in profile.history} & live_texts
     assert not planted, f"{profile.key}: 라이브 원문이 이력에 들어갔다 — {planted}"

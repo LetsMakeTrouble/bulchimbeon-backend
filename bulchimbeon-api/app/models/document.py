@@ -137,6 +137,11 @@ class Chunk(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
+        # `06 §2` ③ — 검색이 `document_version_id IN (...) AND language = :lang` 로 좁힌다 (0013).
+        #
+        # ⚠️ 마이그레이션에만 두면 `alembic check` 가 "인덱스가 지워졌다"로 읽어 드리프트로
+        #    잡는다. 실제로 그렇게 났었다 — 인덱스는 **모델과 마이그레이션 양쪽에** 있어야 한다.
+        Index("ix_chunks_version_language", "document_version_id", "language"),
     )
 
     document_version_id: Mapped[uuid.UUID] = mapped_column(

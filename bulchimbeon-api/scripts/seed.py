@@ -130,6 +130,10 @@ SEED_DOCUMENTS = demo_profiles.GLOBALMART.documents
 EXPECTED_CHUNK_COUNT = demo_profiles.GLOBALMART.expected_chunks
 ANSWERER = demo_profiles.GLOBALMART.answerer
 ASKERS = demo_profiles.GLOBALMART.askers
+# ⚠️ 이 둘도 `tests/test_seed.py` 가 `seed.NO_RED_RESOLVE_KEYS` 로 읽는다. 프로필로 옮기면서
+#    빠뜨려 회귀가 났었다 — 별칭을 지우려면 임포터를 먼저 확인하라.
+NO_APPROVAL_KEYS = demo_profiles.GLOBALMART.no_approval_keys
+NO_RED_RESOLVE_KEYS = demo_profiles.GLOBALMART.no_red_resolve_keys
 
 
 # ⚠️ 청크 수 어서션(`profile.expected_chunks`)을 두는 이유: 청크 수가 `retrieval_top_k`(6)

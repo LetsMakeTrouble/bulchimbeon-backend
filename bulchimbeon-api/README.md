@@ -16,7 +16,7 @@ uv run uvicorn app.main:app --reload --workers 1 --port 8000
 ```
 
 - Swagger UI: <http://localhost:8000/docs>
-- 헬스체크: `curl localhost:8000/health` → `{"status":"ok","db":"ok","version":"0.1.0"}`
+- 헬스체크: `curl localhost:8000/api/health` → `{"status":"ok","db":"ok","version":"0.1.0"}`
 
 > ⚠️ **`--workers 1`은 선택이 아니다.** SSE 구독자 큐가 인메모리이고 APScheduler가 프로세스마다
 > 중복 발화하므로 워커를 늘리면 조용히 깨진다 (`CLAUDE.md` 룰 9, `03 §2` 원칙 5).

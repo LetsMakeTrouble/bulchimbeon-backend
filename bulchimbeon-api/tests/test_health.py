@@ -1,4 +1,4 @@
-"""GET /health — DB ping 포함 (`03 §5.1`)."""
+"""GET /api/health — DB ping 포함 (`03 §5.1`)."""
 
 from collections.abc import AsyncIterator, Iterator
 
@@ -11,7 +11,7 @@ from app.main import app
 
 
 async def test_health_returns_ok_with_db_ping(client: AsyncClient) -> None:
-    response = await client.get("/health")
+    response = await client.get("/api/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "db": "ok", "version": __version__}
@@ -43,7 +43,7 @@ async def test_health_stays_200_when_db_is_down() -> None:
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as broken_client:
-        response = await broken_client.get("/health")
+        response = await broken_client.get("/api/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "degraded", "db": "error", "version": __version__}

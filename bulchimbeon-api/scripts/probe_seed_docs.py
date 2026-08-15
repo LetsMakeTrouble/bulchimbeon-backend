@@ -106,6 +106,15 @@ async def main() -> None:
     parser.add_argument("--answerer", required=True, help="담당자 이메일 (프로젝트 소유자)")
     parser.add_argument("--keep", action="store_true", help="측정용 프로젝트를 남긴다")
     parser.add_argument(
+        "--history",
+        action="store_true",
+        help=(
+            "검증 질문 대신 **이력 변형 전체**를 재고 차단선 아래만 출력한다. "
+            "이력 변형은 원문과 달리 아무도 재보지 않으므로, 30분짜리 --with-history 를 "
+            "돌린 뒤에야 '절반이 no_evidence' 를 발견하는 일이 실제로 있었다 (2026-08-16: 43/109)."
+        ),
+    )
+    parser.add_argument(
         "--profile",
         default=demo_profiles.DEFAULT_PROFILE.key,
         choices=sorted(demo_profiles.PROFILES),
@@ -131,8 +140,12 @@ async def main() -> None:
             if project is None:
                 raise SystemExit(f"프로젝트를 찾지 못했다: {args.project}")
             print(f"기존 측정 프로젝트 재사용: {project.name} ({project.id})")
+            # ⛔ 넘겨받은 프로젝트는 **절대 지우지 않는다.** 실제 데모 프로젝트 id 를 주면
+            #    측정만 하고 끝에서 문서를 통째로 지우려 든다 (2026-08-16에 실제로 그랬고,
+            #    answer_citations 외래키가 막아 준 덕에 데이터가 살았다).
+            args.keep = True
         else:
-            project = await _build_project(db, answerer, profile)
+            project = await _build_project(db, answerer, profile)  # 이것만 지워도 된다
             print(f"측정 프로젝트: {project.name} ({project.id})")
             await _ingest(db, project, answerer, profile)
 
@@ -155,7 +168,9 @@ async def main() -> None:
         print(header)
         print("-" * len(header))
 
-        for question in profile.canonical:
+        targets = profile.history if args.history else profile.canonical
+        below: list[tuple[float, str, str]] = []
+        for question in targets:
             translated = await get_provider().complete_json(
                 prompts.TRANSLATE_SYSTEM,
                 question.content_ko,
@@ -180,11 +195,14 @@ async def main() -> None:
                 query_embeddings=query_embeddings,
                 top_k=int(settings_map["retrieval_top_k"]),
             )
+            label = getattr(question, "key", None) or getattr(question, "family", "?")
             if not found:
-                print(
-                    f"{question.key:<5}{question.content_ko[:32]:<34}"
-                    f"{'—':>9}{'—':>5}{'검색 0건':>10}"
-                )
+                if args.history:
+                    below.append((0.0, label, question.content_ko))
+                else:
+                    print(
+                        f"{label:<5}{question.content_ko[:32]:<34}{'—':>9}{'—':>5}{'검색 0건':>10}"
+                    )
                 continue
 
             sim_raw = found[0].sim_raw
@@ -194,11 +212,18 @@ async def main() -> None:
                 s_ceil=float(settings_map["s_ceil"]),
             )
             # 차단선 아래면 강제 🔴 `no_evidence` 다 — S 가 몇이든 등급이 결정된다.
+            if args.history:
+                if sim_raw < floor:
+                    below.append((sim_raw, label, question.content_ko))
+                continue
+
             note = "🔴 차단" if sim_raw < floor else ("🟢 가능" if score >= 80 else "🟡")
-            print(
-                f"{question.key:<5}{question.content_ko[:32]:<34}"
-                f"{sim_raw:>9.4f}{score:>5}{note:>10}"
-            )
+            print(f"{label:<5}{question.content_ko[:32]:<34}{sim_raw:>9.4f}{score:>5}{note:>10}")
+
+        if args.history:
+            print(f"차단선({floor}) 아래 {len(below)} / {len(targets)}건")
+            for sim_raw, label, text in sorted(below):
+                print(f"  {sim_raw:.4f} {label:<5}{text}")
 
         if not args.keep:
             await _drop(db, project)

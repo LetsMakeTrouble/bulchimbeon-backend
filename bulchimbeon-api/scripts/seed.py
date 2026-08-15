@@ -2,9 +2,19 @@
 
 ```bash
 set -a; . ./.env; set +a
-uv run python scripts/seed.py --reset                  # 유저·프로젝트·문서 4개 + 인제스트
-uv run python scripts/seed.py --reset --with-history   # + 질문 123건 이력·지표 (25~30분)
+uv run python scripts/seed.py --reset                  # 유저·프로젝트·문서 + 인제스트
+uv run python scripts/seed.py --reset --with-history   # + 질문 이력·지표 (25~30분)
+uv run python scripts/seed.py --reset --profile bulchimbeon   # 불침번 자체 데모
 ```
+
+> ### 데모가 둘이다 (`scripts/demo_profiles.py`)
+> `--profile globalmart`(기본)은 M-1 에서 임계값을 실측한 영어 코퍼스이고, `--profile
+> bulchimbeon` 은 불침번 자신을 지식으로 삼는 **혼합 언어**(프론트 영어·백엔드 한국어)
+> 코퍼스다. 두 프로젝트는 서로를 밀어내지 않는다 — `projects.settings` 도
+> `daily_llm_call_limit` 집계도 프로젝트별이기 때문이다.
+> ⛔ 불침번 프로필로 `--with-history` 를 돌리기 **전에** `probe_seed_docs.py --profile
+> bulchimbeon` 으로 S 를 먼저 재라. 교차언어 유사도가 `similarity_floor` 아래면 이력이
+> 통째로 강제 🔴 이 된다 (`bulchimbeon_questions` 독스트링).
 
 > ### 서비스 레이어를 직접 부른다 (HTTP 아님, `09 §2`)
 > 권한 의존성이 끼지 않고, 무엇보다 **카드 상세(`GET /review-cards/{id}`)를 부르지 않는다** —
@@ -83,7 +93,7 @@ from app.models.review_card import (  # noqa: E402
     ReviewCard,
 )
 from app.models.user import User  # noqa: E402
-from app.schemas.project import ProjectCreate  # noqa: E402
+from app.schemas.project import ProjectCreate, SettingsPatch  # noqa: E402
 from app.schemas.question import FeedbackCreate, QuestionCreate  # noqa: E402
 from app.services import (  # noqa: E402
     accuracy_service,
@@ -97,60 +107,34 @@ from app.services.llm import get_provider  # noqa: E402
 from app.services.pipeline import answer as answer_pipeline  # noqa: E402
 from app.services.pipeline import ingest, prompts, retrieval  # noqa: E402
 from app.services.pipeline.llm_schemas import TranslationOut  # noqa: E402
-from scripts.demo_questions import (  # noqa: E402
-    BY_KEY,
-    CANONICAL,
-    HISTORY,
-    NO_APPROVAL_KEYS,
-    NO_RED_RESOLVE_KEYS,
-)
+from scripts import demo_profiles  # noqa: E402
+from scripts.demo_profiles import DemoProfile, DemoUser  # noqa: E402
 
 logger = logging.getLogger("seed")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SEED_DIR = PROJECT_ROOT / "seed"
 
 # --- 데모 설정 (`08 §1`) -----------------------------------------------------------------
 # ⚠️ 값 자체는 `settings.demo_password` 에 있다 — 공개 인스턴스에서는 `DEMO_PASSWORD`
 # env 로 덮어써야 한다 (`config.py` 주석). 여기서 다시 문자열을 적지 않는다.
 DEMO_PASSWORD = settings.demo_password
-PROJECT_NAME = "GlobalMart JP Launch"
-PROJECT_DESCRIPTION = (
-    "한국 커머스팀이 미국 개발 파트너(DevCorp)의 API로 일본 리전 런칭을 준비하는 프로젝트."
-)
-GUIDELINES = (
-    "Answers must reference the exact API version. If a policy differs by region, always say "
-    "which regions were checked. Prefer concise answers with field names in backticks."
-)
+
+# 아래 넷은 **기본 프로필(GlobalMart)의 별칭**이다. `eval_questions.py` ·
+# `probe_seed_docs.py` · `tests/test_seed.py` 가 이 이름들을 그대로 임포트하므로 남긴다.
+# 정본은 `scripts/demo_profiles.py` 다 — 여기서 값을 다시 적지 않는다.
+PROJECT_NAME = demo_profiles.GLOBALMART.project_name
+PROJECT_DESCRIPTION = demo_profiles.GLOBALMART.project_description
+GUIDELINES = demo_profiles.GLOBALMART.guidelines
+SEED_DIR = demo_profiles.GLOBALMART.seed_dir
+SEED_DOCUMENTS = demo_profiles.GLOBALMART.documents
+EXPECTED_CHUNK_COUNT = demo_profiles.GLOBALMART.expected_chunks
+ANSWERER = demo_profiles.GLOBALMART.answerer
+ASKERS = demo_profiles.GLOBALMART.askers
 
 
-@dataclass(frozen=True)
-class DemoUser:
-    email: str
-    name: str
-    language: str
-    timezone: str
-
-
-ANSWERER = DemoUser("mike@devcorp.example", "Mike Chen", "en", "America/New_York")
-ASKERS = (
-    DemoUser("jisoo@globalmart.example", "지수", "ko", "Asia/Seoul"),
-    DemoUser("minjun@globalmart.example", "민준", "ko", "Asia/Seoul"),
-)
-
-# `08 §2` — 4개 문서. 제목은 문서 본문의 H1 을 그대로 쓴다.
-SEED_DOCUMENTS: tuple[tuple[str, str], ...] = (
-    ("api-spec.md", "Orders API Specification v2.1"),
-    ("refund-policy.md", "Refund Policy v1"),
-    ("integration-guide.md", "Integration Guide"),
-    ("meeting-notes-2026-07.md", "Partner Sync Notes — July 2026"),
-)
-
-# `08 §2` — `##` 섹션 하나가 청크 하나다 (11 + 5 + 5 + 2).
-#
-# ⚠️ 어서션으로 두는 이유: 청크 수가 `retrieval_top_k`(6)보다 적으면 검색이 "전부 반환"으로
-#    퇴화하고, 그래도 파이프라인은 초록으로 돈다 — **조용히 깨지는 실패 모드**다 (`08 §5`).
-EXPECTED_CHUNK_COUNT = 23
+# ⚠️ 청크 수 어서션(`profile.expected_chunks`)을 두는 이유: 청크 수가 `retrieval_top_k`(6)
+#    보다 적으면 검색이 "전부 반환"으로 퇴화하고, 그래도 파이프라인은 초록으로 돈다 —
+#    **조용히 깨지는 실패 모드**다 (`08 §5`).
 
 # D25 — 등급별 표본이 이 값 미만이면 `grade_accuracy` 가 "표본 부족"으로 뜬다.
 # 🟢 하나라도 숫자를 띄우려면 🟢 발행이 이만큼은 나와야 한다 (`08 §5`).
@@ -179,7 +163,7 @@ REUSE_FOLLOWUP_COUNT = 6
 # 그 질문들을 물었을 때 파이프라인이 아니라 ② 재사용으로 빠졌다 — sim_raw 가 1.0000 이고
 # 매칭률·인용이 전부 null 이라 **검증 자체가 성립하지 않았다.**
 # 패러프레이즈는 그대로 두므로 이력의 다양성은 잃지 않는다.
-CANONICAL_TEXTS: frozenset[str] = frozenset(question.content_ko for question in CANONICAL)
+CANONICAL_TEXTS: frozenset[str] = demo_profiles.GLOBALMART.canonical_texts
 
 # 🔴 카드 확정 비율 — 담당자가 인박스를 절반쯤 처리한 상태를 만든다.
 RED_RESOLVE_EVERY = 2
@@ -230,13 +214,13 @@ def _reset_statements(project_ids: list[UUID]) -> list[Executable]:
     ]
 
 
-async def reset(db: AsyncSession) -> int:
+async def reset(db: AsyncSession, profile: DemoProfile = demo_profiles.DEFAULT_PROFILE) -> int:
     """기존 데모 프로젝트를 DB 레벨에서 지운다 (D19 — 삭제 API 가 없다).
 
     유저는 남긴다 — 모듈 독스트링 참조.
     """
     project_ids = list(
-        (await db.scalars(select(Project.id).where(Project.name == PROJECT_NAME))).all()
+        (await db.scalars(select(Project.id).where(Project.name == profile.project_name))).all()
     )
     if not project_ids:
         log("· --reset: 지울 데모 프로젝트가 없다.")
@@ -280,17 +264,34 @@ async def ensure_user(db: AsyncSession, spec: DemoUser) -> User:
 # --------------------------------------------------------------------------------------
 # 2. 프로젝트 · 문서
 # --------------------------------------------------------------------------------------
-async def build_project(db: AsyncSession, answerer: User, askers: list[User]) -> Project:
+async def build_project(
+    db: AsyncSession,
+    answerer: User,
+    askers: list[User],
+    profile: DemoProfile = demo_profiles.DEFAULT_PROFILE,
+) -> Project:
     """담당자가 프로젝트를 만들고(D1) 질문자들이 초대 코드로 참여한다."""
     detail = await project_service.create_project(
-        db, answerer, ProjectCreate(name=PROJECT_NAME, description=PROJECT_DESCRIPTION)
+        db,
+        answerer,
+        ProjectCreate(name=profile.project_name, description=profile.project_description),
     )
     project = await project_service.load_project(db, detail.id)
 
     for asker in askers:
         await project_service.join_by_invite_code(db, asker, project.invite_code)
 
-    await project_service.upsert_guideline(db, project.id, GUIDELINES, answerer.id)
+    await project_service.upsert_guideline(db, project.id, profile.guidelines, answerer.id)
+
+    # 프로필이 조정을 들고 있으면 여기서 적용한다 (교차언어 코퍼스의 `similarity_floor` 등).
+    # ⚠️ 조정한 키는 아래 기본값 어서션에서 **건너뛴다** — 어서션의 목적은 "의도하지 않은
+    #    표류"를 잡는 것이지, 프로필이 명시한 값을 막는 것이 아니다.
+    if profile.settings_overrides:
+        await project_service.patch_settings(
+            db, project, SettingsPatch(**profile.settings_overrides)
+        )
+        log(f"· 프로필 설정 적용: {profile.settings_overrides}")
+
     await db.commit()
 
     # `08 §1` 설정 표 — 기본값 그대로여야 한다. 넷은 데모 대사가 그 값에 의존하므로 확인한다.
@@ -300,6 +301,8 @@ async def build_project(db: AsyncSession, answerer: User, askers: list[User]) ->
     # ⚠️ `assert` 가 아니라 `SystemExit` 다. `python -O` 로 돌리면 assert 는 통째로 사라지고,
     #    그러면 데모 재현을 지키는 관문이 조용히 없어진다.
     for key in ("retrieval_top_k", "similarity_floor", "s_floor", "s_ceil"):
+        if key in profile.settings_overrides:
+            continue
         if project.settings[key] != DEFAULT_SETTINGS[key]:
             raise SystemExit(
                 f"{key} 가 기본값과 다르다: {project.settings[key]} != {DEFAULT_SETTINGS[key]}"
@@ -309,7 +312,12 @@ async def build_project(db: AsyncSession, answerer: User, askers: list[User]) ->
     return project
 
 
-async def upload_seed_documents(db: AsyncSession, project: Project, uploader: User) -> None:
+async def upload_seed_documents(
+    db: AsyncSession,
+    project: Project,
+    uploader: User,
+    profile: DemoProfile = demo_profiles.DEFAULT_PROFILE,
+) -> None:
     """`seed/*.md` 4개를 업로드 경로 그대로 태우고 인제스트가 끝날 때까지 기다린다.
 
     ⚠️ 새 진입점을 만들지 않는다 — `create_document` 가 확장자 화이트리스트·크기 상한·
@@ -318,8 +326,8 @@ async def upload_seed_documents(db: AsyncSession, project: Project, uploader: Us
     """
     version_ids: list[UUID] = []
 
-    for filename, title in SEED_DOCUMENTS:
-        path = SEED_DIR / filename
+    for filename, title in profile.documents:
+        path = profile.seed_dir / filename
         if not path.exists():
             raise SystemExit(f"시드 문서가 없다: {path}")
 
@@ -347,10 +355,12 @@ async def upload_seed_documents(db: AsyncSession, project: Project, uploader: Us
     for version_id in version_ids:
         await ingest.run_ingest(version_id, activate_on_ready=True)
 
-    log(f"· 문서 {len(SEED_DOCUMENTS)}개 업로드·인제스트 완료")
+    log(f"· 문서 {len(profile.documents)}개 업로드·인제스트 완료")
 
 
-async def assert_chunk_count(db: AsyncSession, project: Project) -> int:
+async def assert_chunk_count(
+    db: AsyncSession, project: Project, profile: DemoProfile = demo_profiles.DEFAULT_PROFILE
+) -> int:
     """`08 §5` 2번 — 청크 수 어서션. `retrieval_top_k` 보다 커야 검색이 no-op 가 아니다."""
     count = (
         await db.scalar(
@@ -363,9 +373,9 @@ async def assert_chunk_count(db: AsyncSession, project: Project) -> int:
         or 0
     )
     top_k = int(project.settings["retrieval_top_k"])
-    if count != EXPECTED_CHUNK_COUNT:
+    if count != profile.expected_chunks:
         raise SystemExit(
-            f"청크 수가 {count} 다 (기대 {EXPECTED_CHUNK_COUNT}). "
+            f"청크 수가 {count} 다 (기대 {profile.expected_chunks}). "
             f"`08 §2` 본문이 바뀌었거나 청킹 규칙이 달라졌다 — "
             f"`scripts/probe_calibration.py` 의 SEED_CHUNKS 도 함께 확인하라."
         )
@@ -390,16 +400,19 @@ class AskedQuestion:
 
 
 async def run_history(
-    db: AsyncSession, project: Project, askers: list[User]
+    db: AsyncSession,
+    project: Project,
+    askers: list[User],
+    profile: DemoProfile = demo_profiles.DEFAULT_PROFILE,
 ) -> list[AskedQuestion]:
-    """질문 전체(`HISTORY`, 현재 123건)를 **실제 파이프라인으로** 돌린다 (`08 §5` 3번).
+    """프로필의 질문 전체(`profile.history`)를 **실제 파이프라인으로** 돌린다 (`08 §5` 3번).
 
     질문자를 번갈아 배정한다 — "맞았다 2건"이 서로 다른 유저여야 승인 추천이 성립하기
     때문이다 (`04 §7` UNIQUE(answer_id, user_id)).
     """
     results: list[AskedQuestion] = []
 
-    for index, item in enumerate(HISTORY):
+    for index, item in enumerate(profile.history):
         asker = askers[index % len(askers)]
         question = await question_service.create_question(
             db,
@@ -437,7 +450,7 @@ async def run_history(
             )
         )
         log(
-            f"  [{index + 1:2d}/{len(HISTORY)}] {item.family:<3} "
+            f"  [{index + 1:2d}/{len(profile.history)}] {item.family:<3} "
             f"{(row.grade if row is not None else None) or '—':<6} {item.content_ko[:38]}"
         )
 
@@ -481,7 +494,11 @@ async def inject_feedback(db: AsyncSession, asked: list[AskedQuestion], askers: 
 
 
 async def inject_approvals(
-    db: AsyncSession, project: Project, asked: list[AskedQuestion], answerer: User
+    db: AsyncSession,
+    project: Project,
+    asked: list[AskedQuestion],
+    answerer: User,
+    profile: DemoProfile = demo_profiles.DEFAULT_PROFILE,
 ) -> int:
     """담당자 승인 주입 — `grade_accuracy` 분자의 나머지 한쪽이다 (D25).
 
@@ -498,8 +515,8 @@ async def inject_approvals(
         if item.answer_id is not None
         and item.grade in (GRADE_GREEN, GRADE_YELLOW)
         and item.answer_state == ANSWER_STATE_DRAFT
-        and item.family not in NO_APPROVAL_KEYS
-        and item.content_ko not in CANONICAL_TEXTS
+        and item.family not in profile.no_approval_keys
+        and item.content_ko not in profile.canonical_texts
     ]
     approved = 0
 
@@ -519,12 +536,19 @@ async def inject_approvals(
         await db.commit()
         approved += 1
 
-    log(f"· 담당자 승인 {approved}건 주입 (제외 계열: {', '.join(sorted(NO_APPROVAL_KEYS))})")
+    log(
+        f"· 담당자 승인 {approved}건 주입 "
+        f"(제외 계열: {', '.join(sorted(profile.no_approval_keys))})"
+    )
     return approved
 
 
 async def resolve_red_cards(
-    db: AsyncSession, project: Project, asked: list[AskedQuestion], answerer: User
+    db: AsyncSession,
+    project: Project,
+    asked: list[AskedQuestion],
+    answerer: User,
+    profile: DemoProfile = demo_profiles.DEFAULT_PROFILE,
 ) -> int:
     """🔴 카드 일부를 담당자가 **선택지로 확정**한다 — `grade_accuracy` 🔴 의 분자다 (D25).
 
@@ -546,8 +570,8 @@ async def resolve_red_cards(
         if item.answer_id is not None
         and item.grade == GRADE_RED
         and item.answer_state == ANSWER_STATE_DRAFT
-        and item.family not in NO_RED_RESOLVE_KEYS
-        and item.content_ko not in CANONICAL_TEXTS
+        and item.family not in profile.no_red_resolve_keys
+        and item.content_ko not in profile.canonical_texts
     ]
     resolved = 0
 
@@ -591,7 +615,10 @@ async def resolve_red_cards(
             continue
         resolved += 1
 
-    log(f"· 🔴 카드 {resolved}건 확정 (제외 계열: {', '.join(sorted(NO_RED_RESOLVE_KEYS))})")
+    log(
+        f"· 🔴 카드 {resolved}건 확정 "
+        f"(제외 계열: {', '.join(sorted(profile.no_red_resolve_keys))})"
+    )
     return resolved
 
 
@@ -653,7 +680,9 @@ async def run_reuse_followups(
     return reused
 
 
-async def assert_live_questions_not_reusable(db: AsyncSession, project: Project) -> None:
+async def assert_live_questions_not_reusable(
+    db: AsyncSession, project: Project, profile: DemoProfile = demo_profiles.DEFAULT_PROFILE
+) -> None:
     """`09 §2` 승인 주입 어서션 — 명시적 제외 목록의 **추가 안전망**.
 
     제외 목록은 "우리가 의도한 것"만 막는다. 여기서는 결과를 본다: 라이브 시연이 던지는
@@ -683,7 +712,7 @@ async def assert_live_questions_not_reusable(db: AsyncSession, project: Project)
 
     # ⚠️ `NO_APPROVAL_KEYS` 가 아니라 **`NO_RED_RESOLVE_KEYS`** 다 — `resolve_red_cards` 가
     #    🔴 계열에서도 공식 Q&A 를 만들므로, 승인 제외 목록만 보면 Q7 이 무방비가 된다.
-    checked = list(CANONICAL)
+    checked = list(profile.canonical)
     # ① 과 같은 프롬프트·스키마로 영어 번역문을 만든다 — 축이 다르면 어서션이 무의미하다.
     english: list[str] = []
     for question in checked:
@@ -698,7 +727,7 @@ async def assert_live_questions_not_reusable(db: AsyncSession, project: Project)
     vectors = await provider.embed(english)
 
     for question, vector in zip(checked, vectors, strict=True):
-        live = question.key in NO_RED_RESOLVE_KEYS
+        live = question.key in profile.no_red_resolve_keys
         threshold = similar_line if live else reuse_line
         candidate = await retrieval.search_official_qa(
             db, project_id=project.id, query_embedding=vector
@@ -717,7 +746,9 @@ async def assert_live_questions_not_reusable(db: AsyncSession, project: Project)
         log(f"  · {question.key:<4}[{mark}] sim_raw={best:.4f} < {threshold} ✓")
 
 
-def report_grades(asked: list[AskedQuestion]) -> int:
+def report_grades(
+    asked: list[AskedQuestion], profile: DemoProfile = demo_profiles.DEFAULT_PROFILE
+) -> int:
     """등급 분포 보고. 돌려주는 값은 🟢 발행 건수다."""
     grades = Counter(item.grade or "none" for item in asked)
     log("")
@@ -733,12 +764,12 @@ def report_grades(asked: list[AskedQuestion]) -> int:
     off_spec = Counter(
         (item.family, item.grade or "none")
         for item in asked
-        if item.grade not in BY_KEY[item.family].expected_grades
+        if item.grade not in profile.by_key[item.family].expected_grades
     )
     if off_spec:
         log("  기대 등급 밖으로 나온 계열 (`08 §3` 표 기준):")
         for (family, grade), count in sorted(off_spec.items()):
-            expected = "|".join(BY_KEY[family].expected_grades)
+            expected = "|".join(profile.by_key[family].expected_grades)
             log(f"    {family:<4} → {grade:<7} {count}건 (기대 {expected})")
 
     return grades.get(GRADE_GREEN, 0)
@@ -751,44 +782,56 @@ async def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="데모 시드 (`08 §5`)")
     parser.add_argument("--reset", action="store_true", help="기존 데모 데이터를 지우고 재주입")
     parser.add_argument(
+        "--profile",
+        default=demo_profiles.DEFAULT_PROFILE.key,
+        choices=sorted(demo_profiles.PROFILES),
+        help=(
+            "어느 데모를 시드할지 (`scripts/demo_profiles.py`). "
+            f"기본값 {demo_profiles.DEFAULT_PROFILE.key} 는 임계값을 실측한 코퍼스다"
+        ),
+    )
+    parser.add_argument(
         "--with-history",
         action="store_true",
         help=(
-            f"질문 {len(HISTORY)}건을 실제 파이프라인으로 돌려 이력·지표를 채운다 "
-            f"(실 LLM 전제 · 약 {len(HISTORY) * 3}~{len(HISTORY) * 4} 호출 · 25~30분)"
+            "질문 이력을 실제 파이프라인으로 돌려 이력·지표를 채운다 "
+            "(실 LLM 전제 · 질문당 평균 3회 호출 · 25~30분)"
         ),
     )
     args = parser.parse_args(argv)
+    profile = demo_profiles.get(args.profile)
+    history_count = len(profile.history)
 
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    log(f"· 프로필: {profile.key} — '{profile.project_name}'")
 
     if args.with_history and settings.llm_provider != "openai":
         log("")
         log("⚠️  LLM_PROVIDER 가 openai 가 아니다 — FakeLLM 의 임베딩은 해시 기반이라")
         log("    질문↔청크 코사인이 사실상 0 이고 similarity_floor 에 전부 걸린다.")
         log(
-            f"    {len(HISTORY)}건이 **전부 강제 🔴 no_evidence** 로 나온다. "
+            f"    {history_count}건이 **전부 강제 🔴 no_evidence** 로 나온다. "
             "스크립트 점검용으로만 쓸 것."
         )
         log("")
 
     async with AsyncSessionLocal() as db:
         if args.reset:
-            await reset(db)
-        elif await db.scalar(select(Project.id).where(Project.name == PROJECT_NAME)):
+            await reset(db, profile)
+        elif await db.scalar(select(Project.id).where(Project.name == profile.project_name)):
             raise SystemExit(
-                f"'{PROJECT_NAME}' 프로젝트가 이미 있다. 재주입하려면 --reset 을 붙여라."
+                f"'{profile.project_name}' 프로젝트가 이미 있다. 재주입하려면 --reset 을 붙여라."
             )
 
-        answerer = await ensure_user(db, ANSWERER)
-        askers = [await ensure_user(db, spec) for spec in ASKERS]
+        answerer = await ensure_user(db, profile.answerer)
+        askers = [await ensure_user(db, spec) for spec in profile.askers]
         await db.commit()
         _masked = "기본값(demo1234!)" if DEMO_PASSWORD == "demo1234!" else "env 로 지정된 값"
         log(f"· 유저 {1 + len(askers)}명 준비 (비밀번호: {_masked})")
 
-        project = await build_project(db, answerer, askers)
-        await upload_seed_documents(db, project, answerer)
-        await assert_chunk_count(db, project)
+        project = await build_project(db, answerer, askers, profile)
+        await upload_seed_documents(db, project, answerer, profile)
+        await assert_chunk_count(db, project, profile)
 
         if not args.with_history:
             log("")
@@ -797,24 +840,24 @@ async def main(argv: list[str] | None = None) -> int:
             return 0
 
         log("")
-        log(f"── 이력 {len(HISTORY)}건 실행 ────────────────────────────")
-        asked = await run_history(db, project, askers)
+        log(f"── 이력 {history_count}건 실행 ────────────────────────────")
+        asked = await run_history(db, project, askers, profile)
         await inject_feedback(db, asked, askers)
-        await inject_approvals(db, project, asked, answerer)
-        await resolve_red_cards(db, project, asked, answerer)
+        await inject_approvals(db, project, asked, answerer, profile)
+        await resolve_red_cards(db, project, asked, answerer, profile)
 
         log("")
         log("── 재질문(② 재사용 경로) ──────────────────────────────")
         # 라이브 시연이 쓰는 계열은 원문째로 제외한다 — 여기서 공식 Q&A 를 소비하면
         # 발표 당일 시나리오가 재사용으로 빠진다 (`run_reuse_followups` 독스트링).
-        guarded_texts = {BY_KEY[key].content_ko for key in NO_RED_RESOLVE_KEYS}
+        guarded_texts = {profile.by_key[key].content_ko for key in profile.no_red_resolve_keys}
         await run_reuse_followups(db, project, askers, guarded_texts)
 
         log("")
         log("── 라이브 시연 경로 보호 확인 (`09 §2`) ────────────────")
-        await assert_live_questions_not_reusable(db, project)
+        await assert_live_questions_not_reusable(db, project, profile)
 
-        green = report_grades(asked)
+        green = report_grades(asked, profile)
         answered = sum(1 for item in asked if item.status == QUESTION_STATUS_ANSWERED)
         summary = f"질문 {len(asked)}건 · 발행 {answered}건 · 🟢 {green}건"
         log("")
@@ -822,7 +865,7 @@ async def main(argv: list[str] | None = None) -> int:
         if green < MIN_GREEN_SAMPLE:
             log(f"❌ 시드는 주입됐지만 🟢 표본이 {green}건이라 D25 기준({MIN_GREEN_SAMPLE}건)에")
             log("   못 미친다 — `grade_accuracy` 가 전 등급 '표본 부족'으로 떠서 발표 마지막")
-            log("   화면이 빈다. 데이터는 그대로 두었다. 질문셋(scripts/demo_questions.py)의")
+            log("   화면이 빈다. 데이터는 그대로 두었다. 이 프로필의 질문셋에서")
             log("   🟢 계열 변형을 늘린 뒤 --reset --with-history 로 다시 채워라.")
             log(f"   project_id={project.id} · {summary}")
             return 1

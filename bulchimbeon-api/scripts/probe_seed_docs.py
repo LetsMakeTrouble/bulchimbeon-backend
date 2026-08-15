@@ -40,15 +40,15 @@ from app.services import document_service  # noqa: E402
 from app.services.llm import get_provider  # noqa: E402
 from app.services.pipeline import grading, ingest, prompts, retrieval  # noqa: E402
 from app.services.pipeline.llm_schemas import TranslationOut  # noqa: E402
-from scripts.demo_questions import CANONICAL  # noqa: E402
-from scripts.seed import SEED_DIR, SEED_DOCUMENTS  # noqa: E402
+from scripts import demo_profiles  # noqa: E402
+from scripts.demo_profiles import DemoProfile  # noqa: E402
 
 PROBE_PROJECT_NAME = "PROBE — 시드 문서 보강 검증"
 
 
-async def _build_project(db: AsyncSession, answerer: User) -> Project:
+async def _build_project(db: AsyncSession, answerer: User, profile: DemoProfile) -> Project:
     project = Project(
-        name=PROBE_PROJECT_NAME,
+        name=f"{PROBE_PROJECT_NAME} [{profile.key}]",
         description="근거 섹션 보강 효과 측정용. 끝나면 지운다.",
         # 반복 측정을 위해 매번 다르게 만든다 — `ix_projects_invite_code` 가 UNIQUE 다.
         invite_code=f"PROBE{uuid4().hex[:7].upper()}",
@@ -62,10 +62,12 @@ async def _build_project(db: AsyncSession, answerer: User) -> Project:
     return project
 
 
-async def _ingest(db: AsyncSession, project: Project, uploader: User) -> None:
+async def _ingest(
+    db: AsyncSession, project: Project, uploader: User, profile: DemoProfile
+) -> None:
     version_ids = []
-    for filename, title in SEED_DOCUMENTS:
-        payload = (SEED_DIR / filename).read_bytes()
+    for filename, title in profile.documents:
+        payload = (profile.seed_dir / filename).read_bytes()
         _, version = await document_service.create_document(
             db,
             project_id=project.id,
@@ -106,10 +108,21 @@ async def main() -> None:
     parser.add_argument("--answerer", required=True, help="담당자 이메일 (프로젝트 소유자)")
     parser.add_argument("--keep", action="store_true", help="측정용 프로젝트를 남긴다")
     parser.add_argument(
+        "--profile",
+        default=demo_profiles.DEFAULT_PROFILE.key,
+        choices=sorted(demo_profiles.PROFILES),
+        help="어느 데모의 코퍼스·질문셋을 잴지 (`scripts/demo_profiles.py`)",
+    )
+    parser.add_argument(
         "--project",
         help="이미 인제스트해 둔 측정 프로젝트 UUID. 주면 문서를 다시 넣지 않는다.",
     )
     args = parser.parse_args()
+    profile = demo_profiles.get(args.profile)
+    print(
+        f"프로필: {profile.key} — 문서 {len(profile.documents)}개 · "
+        f"질문 {len(profile.canonical)}건\n"
+    )
 
     async with AsyncSessionLocal() as db:
         answerer = await db.scalar(select(User).where(User.email == args.answerer))
@@ -121,9 +134,9 @@ async def main() -> None:
                 raise SystemExit(f"프로젝트를 찾지 못했다: {args.project}")
             print(f"기존 측정 프로젝트 재사용: {project.name} ({project.id})")
         else:
-            project = await _build_project(db, answerer)
+            project = await _build_project(db, answerer, profile)
             print(f"측정 프로젝트: {project.name} ({project.id})")
-            await _ingest(db, project, answerer)
+            await _ingest(db, project, answerer, profile)
 
     settings_map = dict(DEFAULT_SETTINGS)
     floor = float(settings_map["similarity_floor"])
@@ -141,7 +154,7 @@ async def main() -> None:
         print(header)
         print("-" * len(header))
 
-        for question in CANONICAL:
+        for question in profile.canonical:
             translated = await get_provider().complete_json(
                 prompts.TRANSLATE_SYSTEM,
                 question.content_ko,

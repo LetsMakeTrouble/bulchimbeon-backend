@@ -112,6 +112,52 @@ def test_green_sample_is_reachable(profile: DemoProfile) -> None:
     )
 
 
+def test_payload_uuid_round_trip() -> None:
+    """`events.payload` 안의 UUID 가 내보내기·불러오기를 지나 그대로 이어진다.
+
+    ⚠️ 이게 깨지면 **화면은 멀쩡하고 숫자만 틀린다.** 지표가 `payload['card_id']` 로 카드를
+    되짚기 때문에(`metrics_service`), 매핑이 어긋나면 카드 30초 처리율이 0 으로 나온다.
+    """
+    from uuid import uuid4
+
+    from scripts import history_fixture
+
+    card_id, answer_id, stranger = uuid4(), uuid4(), uuid4()
+    refs = {card_id: "review_cards:2", answer_id: "answers:7"}
+    payload = {
+        "card_id": str(card_id),
+        "nested": [{"answer_id": str(answer_id)}, "그냥 문자열"],
+        # 내보내지 않은 UUID 는 손대지 않는다 — 남의 프로젝트를 가리키게 만들면 안 된다.
+        "unrelated": str(stranger),
+        "grade": "green",
+    }
+
+    dumped = history_fixture._replace_uuids(payload, refs)
+    assert dumped["card_id"] == "__ref:review_cards:2"
+    assert dumped["unrelated"] == str(stranger)
+
+    new_ids = {"review_cards:2": uuid4(), "answers:7": uuid4()}
+    restored = history_fixture._restore_uuids(dumped, new_ids)
+    assert restored["card_id"] == str(new_ids["review_cards:2"])
+    assert restored["nested"][0]["answer_id"] == str(new_ids["answers:7"])
+    assert restored["nested"][1] == "그냥 문자열"
+    assert restored["unrelated"] == str(stranger)
+    assert restored["grade"] == "green"
+
+
+def test_fixture_excludes_usage_and_vectors() -> None:
+    """픽스처가 옮기지 않기로 한 것들이 실제로 목록 밖에 있다.
+
+    `llm_usage` 를 심으면 오늘자 사용량으로 잡혀 라이브 질문이 상한에 걸린다.
+    """
+    from scripts import history_fixture
+
+    names = {model.__tablename__ for model in history_fixture.TABLES}
+    assert "llm_usage" not in names
+    assert "briefing_runs" not in names
+    assert "chunks" not in names  # 청크는 인제스트가 만든다 — 픽스처가 심지 않는다.
+
+
 def test_default_profile_is_the_calibrated_one() -> None:
     """기본값은 임계값을 실측한 코퍼스다 (`08 §1`).
 

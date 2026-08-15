@@ -107,7 +107,7 @@ from app.services.llm import get_provider  # noqa: E402
 from app.services.pipeline import answer as answer_pipeline  # noqa: E402
 from app.services.pipeline import ingest, prompts, retrieval  # noqa: E402
 from app.services.pipeline.llm_schemas import TranslationOut  # noqa: E402
-from scripts import demo_profiles  # noqa: E402
+from scripts import demo_profiles, history_fixture  # noqa: E402
 from scripts.demo_profiles import DemoProfile, DemoUser  # noqa: E402
 
 logger = logging.getLogger("seed")
@@ -791,6 +791,17 @@ async def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--from-fixture",
+        nargs="?",
+        const="",
+        metavar="경로",
+        help=(
+            "이력을 파이프라인 대신 **픽스처 파일**에서 심는다 (`scripts/history_fixture.py`). "
+            "LLM 호출은 공식 Q&A 임베딩 재생성뿐이라 수 초·1센트 미만이다. "
+            "경로를 생략하면 <프로필 코퍼스 폴더>/history.json"
+        ),
+    )
+    parser.add_argument(
         "--with-history",
         action="store_true",
         help=(
@@ -800,6 +811,11 @@ async def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     profile = demo_profiles.get(args.profile)
+    if args.with_history and args.from_fixture is not None:
+        raise SystemExit(
+            "--with-history 와 --from-fixture 는 같이 쓸 수 없다 — 전자는 이력을 만들고 "
+            "후자는 만들어 둔 것을 심는다."
+        )
     history_count = len(profile.history)
 
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
@@ -833,10 +849,31 @@ async def main(argv: list[str] | None = None) -> int:
         await upload_seed_documents(db, project, answerer, profile)
         await assert_chunk_count(db, project, profile)
 
+        if args.from_fixture is not None:
+            path = (
+                Path(args.from_fixture)
+                if args.from_fixture
+                else history_fixture.fixture_path(profile)
+            )
+            if not path.exists():
+                raise SystemExit(
+                    f"픽스처가 없다: {path}\n"
+                    "   먼저 한 번 --with-history 로 채운 뒤 "
+                    f"`python scripts/history_fixture.py --profile {profile.key}` 로 내보내라."
+                )
+            log("")
+            log(f"── 픽스처에서 이력 주입 ({path.name}) ──────────────────")
+            planted = await history_fixture.load(db, profile, project, path)
+            log(f"· {planted}행 주입 (공식 Q&A 임베딩은 지금 모델로 다시 만들었다)")
+            log("")
+            log(f"✅ 시드 완료 — project_id={project.id}")
+            return 0
+
         if not args.with_history:
             log("")
             log(f"✅ 시드 완료 — project_id={project.id}")
             log("   이력·지표까지 채우려면 --with-history 로 다시 실행하라 (실 LLM 비용 발생).")
+            log("   이미 내보내 둔 픽스처가 있다면 --from-fixture 가 0원·수 초다.")
             return 0
 
         log("")

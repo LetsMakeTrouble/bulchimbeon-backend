@@ -538,23 +538,29 @@ SET hnsw.iterative_scan = 'relaxed_order';                     -- 에러면 버�
 
 ### 9.4 도커로 통째로 띄우기 (2026-08-12)
 
-운영 서버를 직접 운영할 때의 구성이다. `docker-compose.prod.yml` + `.env.prod`.
+운영 서버를 직접 운영할 때의 구성이다. ⚠️ **오케스트레이션은 이 저장소에 없다** —
+[`bulchimbeon-infra`](https://github.com/LetsMakeTrouble/bulchimbeon-infra) 의 루트
+`docker-compose.yml` 이 프론트까지 함께 띄운다. 이 저장소는 `Dockerfile` 까지만,
+즉 **"이미지를 어떻게 만드는가"** 만 정의한다.
 
 ```bash
-cp .env.prod.example .env.prod        # 값을 채운다 (생성 커맨드가 주석에 있다)
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+git clone --recurse-submodules https://github.com/LetsMakeTrouble/bulchimbeon-infra.git
+cd bulchimbeon-infra
+sh scripts/init-env.sh                # .env 생성 — 비밀값 4개를 만들고 빠진 값을 짚어 준다
+docker compose up -d --build
 ```
 
-⛔ **개발용 `docker-compose.yml` 과 섞지 마라.** 그쪽은 DB 만 띄우고 앱은 호스트에서 도는
-개발 표준이며(`§5.1`) 비밀값이 개발용으로 박혀 있고 마이그레이션도 돌지 않는다.
+⛔ **개발용 `docker-compose.yml` 과 섞지 마라.** 이 저장소의 그것은 DB 만 띄우고 앱은
+호스트에서 도는 개발 표준이며(`§5.1`) 비밀값이 개발용으로 박혀 있고 마이그레이션도 돌지 않는다.
 
-**구성**
+**구성** (아래는 infra 저장소의 compose 기준이다)
 
 | 서비스 | 역할 |
 | --- | --- |
 | `db` | `pgvector/pgvector:pg18`. 호스트 포트를 **열지 않는다** |
 | `migrate` | `alembic upgrade head` 를 돌리고 **종료하는 원샷** |
 | `api` | `migrate` 가 성공해야 시작한다 (`service_completed_successfully`) |
+| `web` | 프론트 정적 번들(nginx). 앞단 터널이 `/api/*` 만 `api` 로 보낸다 |
 
 > ### 왜 마이그레이션을 앱 커맨드에 붙이지 않았나
 > `sh -c 'alembic upgrade head && exec uvicorn …'` 로 묶으면 마이그레이션 실패가 앱
@@ -566,7 +572,9 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
 > `SECRET_KEY=change-me` 인 채로 조용히 뜨는 것이 최악이다 — 로그인 토큰을 누구나
 > 위조할 수 있다.
 
-**검증 실적 (2026-08-12, 실제 기동)**
+**검증 실적 (2026-08-12, 실제 기동)** — 이 저장소에 있던 `docker-compose.prod.yml` 로
+잰 값이다. infra 저장소의 compose 는 `db`·`migrate`·`api` 세 서비스가 같은 구조라
+아래 항목이 그대로 적용되지만, **`web` 을 포함한 재확인은 아직 하지 않았다.**
 
 | 확인 | 결과 |
 | --- | --- |

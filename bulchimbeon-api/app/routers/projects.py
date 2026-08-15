@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import openapi_docs
 from app.core.deps import get_current_user, require_answerer, require_asker, require_member
 from app.database import get_db
 from app.models.project import ProjectMember
@@ -53,7 +54,11 @@ async def list_my_projects(
     return ProjectListResponse(items=await auth_service.my_project_summaries(db, user))
 
 
-@router.post("/join", response_model=ProjectDetail)
+@router.post(
+    "/join",
+    response_model=ProjectDetail,
+    responses=openapi_docs.error_responses("INVITE_ALREADY_JOINED"),
+)
 async def join_project(
     payload: JoinRequest,
     user: User = Depends(get_current_user),

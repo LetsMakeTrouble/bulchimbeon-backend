@@ -12,6 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import openapi_docs
 from app.core.deps import (
     AnswerAccess,
     QuestionAccess,
@@ -115,7 +116,11 @@ async def get_question(
     return await question_service.get_detail(db, access.question, user)
 
 
-@router.patch("/questions/{question_id}", response_model=UrgencyPatched)
+@router.patch(
+    "/questions/{question_id}",
+    response_model=UrgencyPatched,
+    responses=openapi_docs.error_responses("PIPELINE_IN_PROGRESS"),
+)
 async def patch_question(
     payload: UrgencyPatch,
     access: QuestionAccess = Depends(require_question_author),
@@ -131,7 +136,11 @@ async def patch_question(
     return UrgencyPatched(id=question.id, urgency=question.urgency, status=question.status)
 
 
-@router.post("/answers/{answer_id}/feedback", response_model=FeedbackResponse)
+@router.post(
+    "/answers/{answer_id}/feedback",
+    response_model=FeedbackResponse,
+    responses=openapi_docs.error_responses("DUPLICATE_FEEDBACK", "FEEDBACK_NOT_ALLOWED"),
+)
 async def create_feedback(
     payload: FeedbackCreate,
     access: AnswerAccess = Depends(require_answer_asker),

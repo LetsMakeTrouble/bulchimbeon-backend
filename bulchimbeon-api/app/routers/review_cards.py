@@ -12,6 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import openapi_docs
 from app.core.deps import CardAccess, get_current_user, require_answerer, require_card_answerer
 from app.database import get_db
 from app.models.project import ProjectMember
@@ -75,7 +76,11 @@ async def get_review_card(
     return detail
 
 
-@router.post("/review-cards/{card_id}/approve", response_model=CardActionResponse)
+@router.post(
+    "/review-cards/{card_id}/approve",
+    response_model=CardActionResponse,
+    responses=openapi_docs.error_responses("ALREADY_RESOLVED", "INVALID_CARD_ACTION"),
+)
 async def approve_card(
     access: CardAccess = Depends(require_card_answerer),
     user: User = Depends(get_current_user),
@@ -93,7 +98,11 @@ async def approve_card(
     return result  # type: ignore[return-value]
 
 
-@router.post("/review-cards/{card_id}/edit", response_model=CardActionResponse)
+@router.post(
+    "/review-cards/{card_id}/edit",
+    response_model=CardActionResponse,
+    responses=openapi_docs.error_responses("ALREADY_RESOLVED", "INVALID_CARD_ACTION"),
+)
 async def edit_card(
     payload: CardEditRequest,
     access: CardAccess = Depends(require_card_answerer),
@@ -115,7 +124,11 @@ async def edit_card(
     return result  # type: ignore[return-value]
 
 
-@router.post("/review-cards/{card_id}/answer-option", response_model=CardAnswerOptionResponse)
+@router.post(
+    "/review-cards/{card_id}/answer-option",
+    response_model=CardAnswerOptionResponse,
+    responses=openapi_docs.error_responses("ALREADY_RESOLVED", "INVALID_CARD_ACTION"),
+)
 async def answer_option_card(
     payload: CardAnswerOptionRequest,
     access: CardAccess = Depends(require_card_answerer),
@@ -138,7 +151,11 @@ async def answer_option_card(
     return result  # type: ignore[return-value]
 
 
-@router.post("/review-cards/{card_id}/keep", response_model=CardActionResponse)
+@router.post(
+    "/review-cards/{card_id}/keep",
+    response_model=CardActionResponse,
+    responses=openapi_docs.error_responses("ALREADY_RESOLVED", "INVALID_CARD_ACTION"),
+)
 async def keep_card(
     payload: CardKeepRequest,
     access: CardAccess = Depends(require_card_answerer),
@@ -160,7 +177,11 @@ async def keep_card(
     return result  # type: ignore[return-value]
 
 
-@router.post("/review-cards/{card_id}/reject", response_model=CardActionResponse)
+@router.post(
+    "/review-cards/{card_id}/reject",
+    response_model=CardActionResponse,
+    responses=openapi_docs.error_responses("ALREADY_RESOLVED", "INVALID_CARD_ACTION"),
+)
 async def reject_card(
     payload: CardRejectRequest,
     access: CardAccess = Depends(require_card_answerer),
@@ -183,7 +204,11 @@ async def reject_card(
     return result  # type: ignore[return-value]
 
 
-@router.post("/review-cards/{card_id}/defer", response_model=CardDeferResponse)
+@router.post(
+    "/review-cards/{card_id}/defer",
+    response_model=CardDeferResponse,
+    responses=openapi_docs.error_responses("ALREADY_RESOLVED", "INVALID_CARD_ACTION"),
+)
 async def defer_card(
     payload: CardDeferRequest | None = None,
     access: CardAccess = Depends(require_card_answerer),

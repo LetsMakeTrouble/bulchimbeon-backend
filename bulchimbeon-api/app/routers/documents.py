@@ -11,6 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import openapi_docs
 from app.core.deps import (
     DocumentAccess,
     get_current_user,
@@ -39,6 +40,7 @@ router = APIRouter(tags=["documents"])
     "/projects/{project_id}/documents",
     response_model=DocumentDetail,
     status_code=status.HTTP_201_CREATED,
+    responses=openapi_docs.error_responses("VALIDATION_ERROR", "UNSUPPORTED_FILE_TYPE"),
 )
 async def upload_document(
     project_id: UUID,
@@ -78,6 +80,7 @@ async def upload_document(
     "/documents/{document_id}/versions",
     response_model=DocumentDetail,
     status_code=status.HTTP_201_CREATED,
+    responses=openapi_docs.error_responses("VALIDATION_ERROR", "UNSUPPORTED_FILE_TYPE"),
 )
 async def upload_version(
     document_id: UUID,
@@ -126,6 +129,7 @@ async def get_document(
 @router.patch(
     "/documents/{document_id}/versions/{version_id}/activate",
     response_model=ActivateVersionResponse,
+    responses=openapi_docs.error_responses("PIPELINE_IN_PROGRESS", "PIPELINE_FAILED"),
 )
 async def activate_version(
     document_id: UUID,
@@ -161,6 +165,7 @@ async def activate_version(
 @router.get(
     "/documents/{document_id}/versions/{version_id}/content",
     response_model=DocumentContentResponse,
+    responses=openapi_docs.error_responses("PIPELINE_FAILED"),
 )
 async def get_version_content(
     version_id: UUID,

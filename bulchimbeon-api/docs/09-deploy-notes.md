@@ -44,7 +44,7 @@ unavailable" 로만 실패해서 원인을 가리킨다. 같은 이미지를 로
 - **`--workers 1`은 협상 대상이 아니다** (`CLAUDE.md` 룰 9). SSE 구독자 큐가 인메모리라
   워커가 2개면 이벤트가 **절반만** 도착하고, APScheduler가 워커마다 발화해 브리핑이 두 번 나간다.
   `numReplicas: 1`도 같은 이유다 — 워커를 1로 묶어도 레플리카가 2면 똑같이 깨진다.
-- `alembic upgrade head`를 앞에 두는 이유는 컨테이너가 스키마보다 먼저 뜨면 `/health`가
+- `alembic upgrade head`를 앞에 두는 이유는 컨테이너가 스키마보다 먼저 뜨면 `/api/health`가
   DB ping에서 실패하고 헬스체크가 재시작 루프를 만들기 때문이다. alembic은 멱등이라
   재시작마다 돌아도 안전하다.
 
@@ -103,7 +103,7 @@ Railway 볼륨은 **`root:root` 0755로 마운트**된다. 그런데 이 이미�
 돌기 때문에(Dockerfile), 앱이 `/app/storage`에 **한 글자도 쓸 수 없다.**
 Dockerfile의 `chown -R appuser:appuser /app`은 **빌드 시점**이라 런타임 마운트가 그 위를 덮는다.
 
-증상이 고약하다 — **앱은 정상 기동하고 `/health`도 200이다.** 깨지는 건 업로드뿐이라
+증상이 고약하다 — **앱은 정상 기동하고 `/api/health`도 200이다.** 깨지는 건 업로드뿐이라
 시드를 돌려야 비로소 드러난다.
 
 ```bash

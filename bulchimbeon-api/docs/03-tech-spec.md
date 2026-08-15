@@ -407,8 +407,8 @@ uv run ruff check . && uv run ruff format --check .
 uv run python scripts/seed.py
 ```
 
-- Swagger UI: `http://localhost:8000/docs` — 프론트 팀에 URL 공유 (05-api-contract.md와 함께 전달)
-- 헬스체크: `GET /health` → `{"status":"ok","db":"ok"}`
+- Swagger UI: `http://localhost:8000/api/docs` — 프론트 팀에 URL 공유 (05-api-contract.md와 함께 전달)
+- 헬스체크: `GET /api/health` → `{"status":"ok","db":"ok"}`
 - `docker compose up --build`(api까지 컨테이너로)는 **배포 이미지 검증용**이며 개발 루프에서는 쓰지 않는다 — §5.2 참조.
 
 ### 5.2 ⚠️ 실행 환경 주의
@@ -572,7 +572,7 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
 | --- | --- |
 | 기동 순서 | db healthy → migrate 종료(0) → api 시작 ✓ |
 | 스키마 | 21 테이블 · `alembic_version=0012` · pgvector 0.8.6 ✓ |
-| `/health` | `{"status":"ok","db":"ok"}` ✓ |
+| `/api/health` | `{"status":"ok","db":"ok"}` ✓ |
 | `--workers 1` | PID 1 커맨드로 확인 ✓ (룰 9) |
 | 실행 사용자 | `uid=10001(appuser)` — root 아님 ✓ |
 | 업로드 볼륨 | appuser 로 쓰기 가능 ✓ (Railway 에서 겪은 소유권 문제가 없다) |

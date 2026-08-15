@@ -69,7 +69,7 @@
      (`hnsw.iterative_scan` 전제. M-1에서 로컬은 확인했고 **여기서 확인하는 건 배포 DB다**)
    - `.env` 체크리스트 출력. 배포 문서 `docs/09-deploy-notes.md`로 정리(URL·시드 실행 방법·롤백)
 5. **최종 점검 체크리스트 실행 후 결과 보고**
-   - [ ] 클라우드 URL `/health` ok, Swagger 접근 가능
+   - [ ] 클라우드 URL `/api/health` ok, Swagger 접근 가능
    - [ ] **배포 DB의 pgvector extension 생성 권한 + `extversion >= 0.8.0` 확인**
    - [ ] **시작 커맨드에 `--workers 1`이 실제로 들어가 있는지 확인** (대시보드에서 눈으로 확인한다.
          워커가 2개면 SSE가 절반만 도착하고 브리핑이 두 번 나간다)

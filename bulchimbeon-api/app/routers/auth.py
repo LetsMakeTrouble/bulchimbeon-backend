@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import openapi_docs
 from app.core.deps import get_current_user
 from app.database import get_db
 from app.models.user import User
@@ -31,7 +32,11 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> To
     return await auth_service.login(db, payload)
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    responses=openapi_docs.error_responses("UNAUTHORIZED", "TOKEN_EXPIRED"),
+)
 async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
     return await auth_service.refresh(db, payload.refresh_token)
 

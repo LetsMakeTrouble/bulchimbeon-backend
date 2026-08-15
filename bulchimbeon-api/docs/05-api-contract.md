@@ -901,4 +901,4 @@ Accept: text/event-stream
 
 ## 14. 헬스체크
 
-`GET /health` → `{ "status":"ok", "db":"ok", "version":"0.1.0" }` (인증 불필요)
+`GET /api/health` → `{ "status":"ok", "db":"ok", "version":"0.1.0" }` (인증 불필요)

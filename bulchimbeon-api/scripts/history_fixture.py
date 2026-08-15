@@ -82,6 +82,21 @@ DEFERRED: dict[str, tuple[str, ...]] = {
     "answers": ("official_qa_id", "similar_official_qa_id"),
 }
 
+# FK 가 **없는** UUID 컬럼. `events.entity_id` 는 무엇을 가리키는지 `entity_type` 이 정하는
+# 다형 참조라 스키마에 제약이 없다.
+#
+# ⚠️ 아는 행이면 ref 로 바꾸고, 모르는 행(문서·버전처럼 픽스처가 안 옮기는 것)이면 원래
+#    UUID 를 그대로 둔다. 지우면 그 이벤트가 타임라인에서 대상을 잃고, 억지로 다른 행에
+#    붙이면 없는 이력을 만든다. 매달리지 않는 편이 정직하다.
+POLYMORPHIC_UUID: dict[str, tuple[str, ...]] = {"events": ("entity_id",)}
+
+# 시드가 **스스로 다시 찍는** 이벤트의 대상들. 픽스처는 이력만 들고 있어야 한다.
+#
+# ⚠️ 안 걸러내면 임포트한 프로젝트의 이벤트가 이만큼 **중복**된다 — 프로젝트 생성·초대
+#    참여·문서 업로드는 `--from-fixture` 경로에서도 실제로 다시 일어나기 때문이다.
+#    (실측 2026-08-16: `document.version_activated` 5건 + `member.joined` 3건이 겹쳤다.)
+SETUP_ENTITY_TYPES = ("project", "project_member", "document", "document_version", "guideline")
+
 # 프로젝트 스코프 컬럼 — 파일에 적지 않고 임포트가 새 프로젝트 id 로 채운다.
 PROJECT_COLUMN = "project_id"
 
@@ -181,6 +196,12 @@ def _select_for(model: type, project_id: UUID) -> Any:
         )
     else:  # 새 테이블을 TABLES 에 넣고 여기를 안 고친 경우다.
         raise SystemExit(f"{model.__tablename__}: 프로젝트로 좁히는 방법이 정의되지 않았다.")
+
+    if model is Event:
+        stmt = stmt.where(
+            Event.entity_type.is_(None) | Event.entity_type.notin_(SETUP_ENTITY_TYPES)
+        )
+
     return stmt.order_by(model.created_at, model.id)
 
 
@@ -237,7 +258,14 @@ def _dump_row(
         elif isinstance(value, (dict, list)):
             out[name] = _replace_uuids(value, refs)
         elif isinstance(value, UUID):
-            raise SystemExit(f"{model.__tablename__}.{name}: FK 가 아닌 UUID 는 옮길 수 없다.")
+            if name not in POLYMORPHIC_UUID.get(model.__tablename__, ()):
+                raise SystemExit(
+                    f"{model.__tablename__}.{name}: FK 가 아닌 UUID 다 — 규칙이 없다. "
+                    "다형 참조라면 POLYMORPHIC_UUID 에 등록하고, 아니라면 왜 UUID 인지 "
+                    "확인한 뒤 규칙을 더해라."
+                )
+            ref = refs.get(value)
+            out[name] = {"__ref": ref} if ref else {"__uuid": str(value)}
         else:
             out[name] = value
     return out
@@ -288,6 +316,17 @@ async def load(db: AsyncSession, profile: DemoProfile, project: Project, path: P
     deferred: list[tuple[Any, str, UUID]] = []
     planted = 0
 
+    # ⚠️ `official_qas.question_embedding` 은 NOT NULL 이다 — 행을 먼저 넣고 나중에 채울 수
+    #    없다(첫 flush 에서 죽는다). 삽입 **전에** 한 번에 만들어 둔다.
+    #    입력은 `question_en` — `official_qa_service` 가 임베딩하는 텍스트와 같아야 재질문이
+    #    ② 재사용 경로를 탄다 (`06 §2` ②).
+    official_rows = rows.get(OfficialQA.__tablename__, [])
+    official_vectors = (
+        await get_provider().embed([row["question_en"] for row in official_rows])
+        if official_rows
+        else []
+    )
+
     for model in TABLES:
         key = model.__tablename__
         cyclic = DEFERRED.get(key, ())
@@ -302,6 +341,9 @@ async def load(db: AsyncSession, profile: DemoProfile, project: Project, path: P
                 values[name] = _resolve(
                     raw_value, ids=ids, users=users, chunks=chunks, now=now
                 )
+
+            if model is OfficialQA:
+                values["question_embedding"] = official_vectors[index]
 
             entity = model(**values)
             db.add(entity)
@@ -318,7 +360,6 @@ async def load(db: AsyncSession, profile: DemoProfile, project: Project, path: P
         setattr(entity, column_name, target_id)
     await db.flush()
 
-    await _rebuild_embeddings(db, project.id)
     await db.commit()
     return planted
 
@@ -342,6 +383,9 @@ def _resolve(
         if email not in users:
             raise SystemExit(f"픽스처가 가리키는 유저가 없다: {email} — 시드를 먼저 돌려라.")
         return users[email]
+    if "__uuid" in value:
+        # 픽스처 밖을 가리키던 다형 참조. 그대로 둔다 (`POLYMORPHIC_UUID` 주석).
+        return UUID(value["__uuid"])
     if "__chunk" in value:
         chunk_key = ChunkKey(*value["__chunk"])
         if chunk_key not in chunks:
@@ -362,23 +406,6 @@ def _restore_uuids(value: Any, ids: dict[str, UUID]) -> Any:
     if isinstance(value, str) and value.startswith("__ref:"):
         return str(ids[value.removeprefix("__ref:")])
     return value
-
-
-async def _rebuild_embeddings(db: AsyncSession, project_id: UUID) -> None:
-    """공식 Q&A 임베딩을 지금 모델로 다시 만든다 (모듈 독스트링).
-
-    입력은 `question_en` 이다 — `official_qa_service` 가 임베딩하는 텍스트와 같아야
-    재질문이 재사용 경로를 탄다 (`06 §2` ②).
-    """
-    items = list(
-        (await db.scalars(select(OfficialQA).where(OfficialQA.project_id == project_id))).all()
-    )
-    if not items:
-        return
-    vectors = await get_provider().embed([item.question_en for item in items])
-    for item, vector in zip(items, vectors, strict=True):
-        item.question_embedding = vector
-    await db.flush()
 
 
 def fixture_path(profile: DemoProfile) -> Path:

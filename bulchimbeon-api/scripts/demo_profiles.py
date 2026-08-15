@@ -63,6 +63,12 @@ class DemoProfile:
     history: tuple[object, ...]
     no_approval_keys: frozenset[str]
     no_red_resolve_keys: frozenset[str]
+    # 라이브 시연이 **원문 그대로** 던지는 계열. 이력은 변형만 던진다.
+    #
+    # ⚠️ `no_approval_keys` 와 다른 축이다. 승인 제외는 "계열 전체를 공식 Q&A 로 만들지
+    #    않는다" 이고, 이쪽은 "원문 문장을 이력이 소진하지 않는다" 다. GlobalMart 의 Q2·Q7 은
+    #    앞의 것만 해당하므로 **원문이 이력에 들어가는 것이 정상**이다.
+    live_only_keys: frozenset[str]
     # 이 프로필만의 `projects.settings` 조정. 비어 있으면 기본값 그대로다.
     #
     # ⚠️ 여기에 키를 넣으면 시드의 기본값 어서션이 **그 키만** 건너뛴다. 교차언어 코퍼스라
@@ -104,6 +110,7 @@ GLOBALMART = DemoProfile(
     history=demo_questions.HISTORY,
     no_approval_keys=demo_questions.NO_APPROVAL_KEYS,
     no_red_resolve_keys=demo_questions.NO_RED_RESOLVE_KEYS,
+    live_only_keys=demo_questions.LIVE_ONLY_KEYS,
 )
 
 # 불침번 팀 자신을 지식으로 삼는 데모.
@@ -143,6 +150,7 @@ BULCHIMBEON = DemoProfile(
     history=bulchimbeon_questions.HISTORY,
     no_approval_keys=bulchimbeon_questions.NO_APPROVAL_KEYS,
     no_red_resolve_keys=bulchimbeon_questions.NO_RED_RESOLVE_KEYS,
+    live_only_keys=bulchimbeon_questions.LIVE_ONLY_KEYS,
 )
 
 PROFILES: dict[str, DemoProfile] = {

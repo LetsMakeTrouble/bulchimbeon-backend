@@ -80,12 +80,16 @@ def test_history_fits_daily_call_limit(profile: DemoProfile) -> None:
 def test_live_only_originals_are_not_in_history(profile: DemoProfile) -> None:
     """라이브 시연이 쓰는 원문은 이력이 미리 소진하지 않는다 (`09 §2`).
 
-    ⚠️ 판정 기준은 `content_ko` 다. 계열이 이력에 등장하는 것 자체는 정상이고(변형은 무방),
-    **원문 문장**이 이력에 들어간 것만 문제다.
+    ⚠️ 판정 기준은 **`live_only_keys`** 다. `no_approval_keys`·`no_red_resolve_keys` 는 다른
+    축이라 그걸로 재면 멀쩡한 데이터가 위반으로 잡힌다 — GlobalMart 의 Q2·Q7 은 승인만
+    막고 원문은 이력에 넣는 것이 사양이다.
+
+    ⚠️ 판정 대상도 `content_ko` 다. 계열이 이력에 등장하는 것 자체는 정상이고(변형은 무방),
+    **원문 문장**이 들어간 것만 문제다.
     """
     live_texts = {
         profile.by_key[key].content_ko
-        for key in profile.no_red_resolve_keys
+        for key in profile.live_only_keys
         if key in profile.by_key
     }
     planted = {item.content_ko for item in profile.history} & live_texts

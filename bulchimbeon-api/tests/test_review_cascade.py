@@ -6,6 +6,7 @@
 """
 
 from typing import Any
+from uuid import UUID
 
 import pytest_asyncio
 from httpx import AsyncClient
@@ -13,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.event import Event
+from app.models.notification import Notification
 from app.models.official_qa import (
     OFFICIAL_QA_STATUS_ARCHIVED,
     OFFICIAL_QA_STATUS_UNDER_REVIEW,
@@ -60,12 +62,23 @@ async def _verified_answer(
 # --------------------------------------------------------------------------------------
 # 새 버전 활성화 (룰 5, D9)
 # --------------------------------------------------------------------------------------
+async def _answerer_notification_types(db_session: AsyncSession, team: Team) -> list[str]:
+    rows = await db_session.scalars(
+        select(Notification)
+        .where(Notification.user_id == UUID(team.owner.id))
+        .order_by(Notification.created_at, Notification.id)
+    )
+    return [notification.type for notification in rows]
+
+
 async def test_activating_a_new_version_sends_confirmed_answers_back_to_review(
     client: AsyncClient, db_session: AsyncSession, team: Team
 ) -> None:
     content_ko = f"근거가 갱신될 질문. {YELLOW_MARKER}"
     question_id, document, _ = await _verified_answer(client, db_session, team, content_ko)
     new_version = await seed_new_version(db_session, document=document, uploader_id=team.owner.id)
+    # 셋업(파이프라인)이 이미 보낸 알림은 빼고 **연쇄가 더한 것**만 센다.
+    before = await _answerer_notification_types(db_session, team)
 
     response = await client.patch(
         f"{API}/documents/{document.id}/versions/{new_version.id}/activate",
@@ -98,6 +111,11 @@ async def test_activating_a_new_version_sends_confirmed_answers_back_to_review(
         )
     )
     assert [event.payload["count"] for event in cascade] == [1]
+
+    # ⛔ 알림은 **카드마다가 아니라 사건마다** 하나다 (`create_card` 독스트링).
+    #    연쇄에 `notify_card_created` 를 추가하면 여기가 깨진다 — 누락으로 신고된 자리다.
+    after = await _answerer_notification_types(db_session, team)
+    assert after[len(before) :] == ["doc.review_needed"]
 
 
 async def test_keep_returns_a_doc_update_card_to_verified(

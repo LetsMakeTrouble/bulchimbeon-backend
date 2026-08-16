@@ -176,6 +176,23 @@ async def create_card(
 ) -> ReviewCard:
     """카드 1건 + `card.created` 이벤트.
 
+    ### ⛔ 알림은 **카드마다가 아니라 사건마다** 하나다 (`04 §4` 타입 어휘)
+    이 함수는 알림을 보내지 않는다. 호출자가 자기 사건의 알림 타입 하나를 보낸다:
+
+    | 부르는 곳 | 보내는 알림 |
+    | --- | --- |
+    | `pipeline/answer.py` 보류·실패·🟢 | `card.created` (`notifies_answerer` 로 🟢 제외) |
+    | `feedback_service` 질문자 "달랐음" | `feedback.different` |
+    | `review_cascade_service` 문서 갱신 | `doc.review_needed` — 카드 N개에 알림 **1건** |
+
+    ⚠️ 그래서 연쇄·피드백 경로에 `notify_card_created` 를 **추가하지 마라.** 실제로 누락으로
+    신고된 적이 있다 — "카드를 만드는데 알림을 안 보낸다"로 읽히기 때문이다. 넣으면 문서 하나가
+    답변 12건을 건드릴 때 알림이 13개 가고, "담당자에게 가는 알림은 질문 10개 중 2~3개"
+    라는 제품의 주장이 깨진다. `tests/test_review_cascade.py` 가 이 개수를 고정한다.
+
+    ⚠️ 알림을 이 함수 안으로 넣어 통일할 수도 없다 — **알림의 단위가 카드가 아니기**
+    때문이다. 연쇄는 카드 N개에 "N건 재검토" 알림 1건이라 카드마다 부를 수가 없다.
+
     `question_struct` 는 `answers.question_struct`(M3 이 이미 저장했다)에서 **복사**한다 —
     다시 생성하지 않는다. `05 §7` 이 🔴 전달용이라고 못박았으므로 `reason='red'` 에만 채운다.
     """

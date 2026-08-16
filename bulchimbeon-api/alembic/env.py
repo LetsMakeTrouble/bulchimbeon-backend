@@ -2,6 +2,14 @@
 
 alembic.ini 에 URL 을 복사해 두지 않는다. 비밀값이 파일로 새고, `.env` 와 어긋난 URL 로
 마이그레이션이 엉뚱한 DB 에 걸린다.
+
+> ### ⛔ `alembic.ini` 에는 **ASCII 만** 쓴다 — 설명은 이 파일에 적는다
+> alembic 도(`util/compat.read_config_parser`) `fileConfig` 도 ini 를 **로케일 인코딩**으로
+> 읽는다. UTF-8 모드(`PYTHONUTF8=1`)로도 못 바꾼다 — `locale.getencoding()` 은 UTF-8 모드와
+> 무관하게 OS 코드페이지를 그대로 돌려준다. 그래서 ini 에 한글 주석이 한 줄이라도 있으면
+> cp949 로케일(윈도우 한국어)에서 **alembic 명령 전체가** UnicodeDecodeError 로 죽는다.
+> 마이그레이션은 멀쩡한데 `upgrade`·`check`·`downgrade` 가 전부 안 되므로 원인을 스키마
+> 쪽에서 찾게 된다. `tests/test_migrations.py` 가 ini 의 ASCII 를 고정한다.
 """
 
 import asyncio

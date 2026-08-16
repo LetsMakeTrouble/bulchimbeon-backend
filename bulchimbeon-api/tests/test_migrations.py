@@ -48,6 +48,22 @@ async def _alembic(url: str, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def test_alembic_ini_is_ascii_only() -> None:
+    """`alembic.ini` 에 ASCII 밖 문자가 없어야 한다 (`alembic/env.py` 독스트링).
+
+    alembic 도 `fileConfig` 도 ini 를 **로케일 인코딩**으로 읽고, `PYTHONUTF8=1` 로도 못
+    바꾼다. 한글 주석이 한 줄 들어가면 cp949 로케일에서 alembic 명령 전체가 죽는다 —
+    윈도우 개발자에게는 마이그레이션이 통째로 안 도는 것으로 보인다. 설명은 ini 가 아니라
+    `env.py` 에 적는다.
+    """
+    raw = (PROJECT_ROOT / "alembic.ini").read_bytes()
+    try:
+        raw.decode("ascii")
+    except UnicodeDecodeError as exc:
+        offending = raw[max(0, exc.start - 60) : exc.start + 60].decode("utf-8", "replace")
+        pytest.fail(f"alembic.ini 에 ASCII 밖 문자가 있다 (byte {exc.start}):\n…{offending}…")
+
+
 async def _table_names(engine: AsyncEngine) -> set[str]:
     async with engine.connect() as conn:
         rows = await conn.scalars(

@@ -194,6 +194,7 @@ async def main() -> None:
                 project_id=project.id,
                 query_embeddings=query_embeddings,
                 top_k=int(settings_map["retrieval_top_k"]),
+                query_texts=texts,
             )
             label = getattr(question, "key", None) or getattr(question, "family", "?")
             if not found:

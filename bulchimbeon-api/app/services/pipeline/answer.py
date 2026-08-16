@@ -171,13 +171,13 @@ class _Ctx:
 QUESTION_LANGUAGE = "ko"
 
 
-async def _search_embeddings(
+async def _search_queries(
     ctx: Any,
     db: AsyncSession,
     project: Project,
     question: Question,
     english_embedding: list[float],
-) -> dict[str, list[float]]:
+) -> tuple[dict[str, list[float]], dict[str, str]]:
     """③ 이 쓸 `{언어: 질의 임베딩}` — **프로젝트에 실제로 있는 언어만** 만든다.
 
     임베딩은 같은 언어끼리 비교할 때 가장 정확하다. 축이 영어 하나뿐이면 한국어 문서가
@@ -212,14 +212,20 @@ async def _search_embeddings(
         pending[language] = translated["content_en"]
 
     embeddings: dict[str, list[float]] = {}
+    texts: dict[str, str] = dict(pending)
     if DEFAULT_LANGUAGE in languages:
         embeddings[DEFAULT_LANGUAGE] = english_embedding
+        texts.setdefault(DEFAULT_LANGUAGE, question.content_en or question.content_ko)
     if pending:
         vectors = await get_provider().embed(list(pending.values()))
         embeddings.update(zip(pending, vectors, strict=True))
 
     # 언어를 하나도 못 찾는 경우(청크 0건)는 호출자가 `no_evidence` 로 처리한다.
-    return embeddings or {DEFAULT_LANGUAGE: english_embedding}
+    if not embeddings:
+        return {DEFAULT_LANGUAGE: english_embedding}, {
+            DEFAULT_LANGUAGE: question.content_en or question.content_ko
+        }
+    return embeddings, texts
 
 
 async def run_answer_pipeline(question_id: UUID) -> None:
@@ -415,12 +421,16 @@ async def _pipeline(db: AsyncSession, question_id: UUID) -> _Outcome | None:
 
     # --- ③ 근거 검색 -----------------------------------------------------------------
     _guard_deadline(ctx, "retrieval")
-    query_embeddings = await _search_embeddings(ctx, db, project, question, query_embedding)
+    query_embeddings, query_texts = await _search_queries(
+        ctx, db, project, question, query_embedding
+    )
     evidence = await retrieval.search_evidence(
         db,
         project_id=project.id,
         query_embeddings=query_embeddings,
         top_k=int(ctx.setting("retrieval_top_k")),
+        # 식별자 보강용 원문 — `VITE_API_BASE_URL` 같은 토큰은 벡터가 뭉갠다.
+        query_texts=query_texts,
     )
     if not evidence:
         return await _forced_red(

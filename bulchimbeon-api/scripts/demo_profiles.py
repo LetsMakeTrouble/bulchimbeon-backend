@@ -158,7 +158,14 @@ BULCHIMBEON = DemoProfile(
     no_approval_keys=bulchimbeon_questions.NO_APPROVAL_KEYS,
     no_red_resolve_keys=bulchimbeon_questions.NO_RED_RESOLVE_KEYS,
     live_only_keys=bulchimbeon_questions.LIVE_ONLY_KEYS,
-    # ⚠️ 조정 없음 — **기본값 그대로**다.
+    # ⚠️ 임계값은 조정하지 않는다 — **기본값 그대로**다.
+    #
+    # 상한만 올린다. 언어별 검색 축이 들어오면서 질문당 임베딩이 하나 늘어 실측 5~6 호출이
+    # 됐고(① 번역 1 + 임베딩 2 + ④ + ⑤ + ⑦), 이력 109건이면 기본 상한 500 을 넘는다.
+    # 실제로 지난 실행에서 뒷부분 8건이 조용히 강제 🔴 `quota_exceeded` 로 떨어졌다.
+    # ⛔ 이 값은 **시드가 쓰는 한도**다. 발표 당일 라이브 질문은 API 서버 프로세스에서
+    #    별도로 세므로 여기 올린다고 라이브가 위험해지지 않는다.
+    settings_overrides={"daily_llm_call_limit": 1000},
     #
     # 한때 여기에 `similarity_floor` 0.325 를 넣었다. 한국어 문서를 영어 질의로만 찾던
     # 시절의 보정이었는데, 검색이 언어별 축으로 바뀌면서(0013 · `retrieval.search_evidence`)

@@ -109,6 +109,7 @@ class _Sentence:
     text_ko: str
     aliases: list[str]  # EVIDENCE 에 실재하는 별칭만 남은 것
     supported: bool = False
+    quote: str = ""  # ⑤ 가 지목한 근거 원문. ⑤ 를 건너뛴 경로에서는 빈 문자열로 남는다.
 
 
 @dataclass
@@ -555,9 +556,15 @@ async def _pipeline(db: AsyncSession, question_id: UUID) -> _Outcome | None:
             schema=VerdictsOut,
             model=env_settings.llm_model_verify,
         )
-        by_position = {item["index"]: bool(item["supported"]) for item in verdicts["verdicts"]}
+        by_position = {item["index"]: item for item in verdicts["verdicts"]}
         for position, sentence in enumerate(verifiable, start=1):
-            sentence.supported = by_position.get(position, False)
+            # 판정이 누락된 문장은 기본값(supported=False, quote="") 그대로 둔다 —
+            # 근거를 주장하지 않는 쪽이 안전한 방향이다.
+            verdict = by_position.get(position)
+            if verdict is None:
+                continue
+            sentence.supported = bool(verdict["supported"])
+            sentence.quote = verdict["quote"]
 
     if deadline_skipped_verify:
         return await _publish_generated(
@@ -951,6 +958,26 @@ async def _publish_generated(
     )
 
 
+def _citation_quote(quote: str, content: str) -> str:
+    """`citations[].quote` 로 저장할 인용문 (`05 §6`) — **청크에 실재할 때만** ⑤ 의 것을 쓴다.
+
+    ⑤ 가 지어낸 문장을 근거랍시고 저장하면 환각 방어(`06 §7`)가 뚫린다. 실재 검증이
+    화면 요구와도 일치한다 — 프론트 하이라이트가 원문에서 이 문자열을 그대로 찾는 방식이라
+    부분 문자열이 아니면 어차피 아무것도 칠해지지 않는다.
+
+    폴백(청크 앞부분)은 종전 동작 그대로이며 다음 경로에서 쓰인다: ⑤ 가 빈 quote 를 준
+    경우, 지어낸 경우, 한 문장이 인용한 **다른** 청크(⑤ 는 문장당 하나만 지목한다),
+    그리고 데드라인 초과로 ⑤ 자체를 건너뛴 경우 (`06 §6`).
+
+    ⚠️ 잘라내기는 실재 검증 **뒤**다. 자른 뒤에 비교하면 500자를 넘는 정당한 인용이
+    전부 폴백으로 떨어진다.
+    """
+    picked = quote.strip()
+    if picked and picked in content:
+        return picked[: prompts.QUOTE_MAX_LENGTH]
+    return content[: prompts.QUOTE_MAX_LENGTH]
+
+
 def _add_citations(
     db: AsyncSession,
     *,
@@ -962,6 +989,10 @@ def _add_citations(
 
     ⚠️ `official_qa_id` 는 채우지 않는다 — D24 이후 항상 NULL 이며 `05 §6` `citations[]` 에
     대응 필드가 없다.
+
+    ⚠️ 인용은 **청크당 1행**이다(`seen`). 같은 청크를 두 문장이 인용하면 먼저 발행된 문장의
+    quote 만 남는다 — 문장별 인용을 화면에 내려면 `answer_citations` 에 문장 순번 컬럼과
+    `05 §6` 계약 변경이 필요하다. 여기서 할 일이 아니다.
     """
     aliases = {f"ch-{index}": chunk for index, chunk in enumerate(evidence, start=1)}
     seen: set[UUID] = set()
@@ -977,7 +1008,7 @@ def _add_citations(
                     answer_id=answer.id,
                     chunk_id=chunk.chunk_id,
                     official_qa_id=None,
-                    quote=chunk.content[: prompts.QUOTE_MAX_LENGTH],
+                    quote=_citation_quote(sentence.quote, chunk.content),
                     similarity=chunk.sim_raw,
                 )
             )

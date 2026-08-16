@@ -29,6 +29,7 @@ from app.models.question import (
 from app.services import answer_service, event_service
 from app.services.llm.fake_provider import SENTENCE_BLOCK_PREFIX, FakeLLMProvider
 from app.services.pipeline import prompts, quota
+from app.services.pipeline.answer import _citation_quote
 from tests.helpers import (
     Actor,
     close_dnd_window,
@@ -797,3 +798,59 @@ async def test_verify_receives_the_whole_chunk_not_a_display_snippet(
     assert tail in verify_prompts[0], (
         "인용 청크가 잘려 ⑤ 가 근거 뒷부분을 보지 못했다 — G 가 0 으로 무너지는 경로다"
     )
+
+
+def test_citation_quote_takes_the_verified_span_only_when_it_exists_in_the_chunk() -> None:
+    """⑤ 가 지목한 인용문은 **청크에 실재할 때만** 쓴다 (`06 §7` 환각 방어).
+
+    실재 검증이 무너지면 지어낸 문장이 근거로 저장되고, 프론트는 원문에서 그 문자열을
+    찾지 못해 하이라이트가 통째로 사라진다 (`05 §6`). 폴백은 종전 동작(청크 앞부분)이다.
+    """
+    content = "Refunds are issued within 30 days. Shipping fees are not refunded."
+    picked = "Shipping fees are not refunded."
+
+    assert _citation_quote(picked, content) == picked
+    # 앞뒤 공백은 인용의 일부가 아니다 — 이것 때문에 폴백으로 떨어지면 손해만 본다.
+    assert _citation_quote(f"  {picked}\n", content) == picked
+    assert _citation_quote("Refunds take 90 days.", content) == content  # 환각 → 폴백
+    assert _citation_quote("", content) == content  # ⑤ 미실행·근거 없음 → 폴백
+
+    # ⚠️ 잘라내기는 실재 검증 **뒤**다. 순서가 뒤집히면 500자를 넘는 정당한 인용이
+    #    전부 폴백으로 떨어져 이 기능이 조용히 죽는다.
+    long_content = "Idempotency. " * prompts.QUOTE_MAX_LENGTH
+    assert _citation_quote(long_content, long_content) == long_content[: prompts.QUOTE_MAX_LENGTH]
+
+
+async def test_citation_quote_is_the_supporting_sentence_not_the_chunk_head(
+    client: AsyncClient, db_session: AsyncSession, team: Fixture
+) -> None:
+    """`05 §6` `citations[].quote` — 출처를 가리키는 데서 그치지 않고 근거 문장을 인용한다.
+
+    ⑤ 는 판정하려고 **이미** 근거를 찾은 상태이므로 그것을 받아 적는다 — LLM 호출은 늘지
+    않는다. 청크 앞부분을 그대로 싣던 종전 동작에서는 근거가 청크 뒤쪽에 있을 때 인용에
+    아예 나타나지 않아, 화면이 "출처는 이 문서다"까지만 말할 수 있었다.
+    """
+    content_ko = "GET 요청에도 멱등키가 적용되나요? [[fake:sentences=1,supported=1]]"
+    tail = "Idempotency keys are ignored on GET and DELETE requests."
+    body = (
+        "Write endpoints accept an optional Idempotency-Key header. "
+        + "The key is stored with the request fingerprint for 24 hours. " * 8
+        + tail
+    )
+    # 근거가 청크 앞부분 **밖**에 있어야 이 테스트가 구분력을 갖는다.
+    assert body.index(tail) > prompts.QUOTE_MAX_LENGTH
+
+    await seed_document(
+        db_session,
+        project_id=team.project_id,
+        uploader_id=team.owner.id,
+        chunks=[(body, embedding_with_cosine(content_ko, HIGH_SIMILARITY))],
+    )
+    await db_session.commit()
+
+    detail = await ask_and_get(client, team.asker, team.project_id, content_ko)
+    quotes = [citation["quote"] for citation in detail["answer"]["citations"]]
+
+    assert quotes == [tail]
+    # 프론트 하이라이트가 원문에서 이 문자열을 그대로 찾는다 (`05 §6`).
+    assert body.count(tail) == 1

@@ -8,7 +8,12 @@
 테스트는 그 결과로 임베딩을 재현한다 (`fake_provider` 독스트링).
 """
 
-from app.services.llm.fake_provider import LESSON_CORRECTED_PREFIX, SENTENCE_BLOCK_PREFIX
+from app.services.llm.fake_provider import (
+    EVIDENCE_BLOCK_PREFIX,
+    EVIDENCE_SEPARATOR,
+    LESSON_CORRECTED_PREFIX,
+    SENTENCE_BLOCK_PREFIX,
+)
 from app.services.pipeline.retrieval import EvidenceChunk
 
 # `05 §6` `citations[].quote` — 원문 화면에서 하이라이트할 스니펫. 청크 전체를 싣지 않는다.
@@ -63,6 +68,9 @@ VERIFY_SYSTEM = (
     "You check whether each sentence is actually supported by the evidence cited for it.\n"
     "- supported=true only when the cited chunks state the claim. Paraphrase is fine; "
     "an unrelated or merely topical chunk is not.\n"
+    "- quote: the span of the cited evidence that states the claim, copied verbatim — "
+    "character for character, no trimming, no reformatting, no translation. Prefer one "
+    "sentence. Empty string when supported=false.\n"
     "- Return exactly one verdict per sentence, using the sentence's index."
 )
 
@@ -147,8 +155,10 @@ def verify_user_prompt(blocks: list[tuple[int, str, list[str]]]) -> str:
     """
     parts: list[str] = []
     for index, text_en, quotes in blocks:
-        evidence = "\n".join(f"- {quote}" for quote in quotes) or "- (none)"
-        parts.append(f"{SENTENCE_BLOCK_PREFIX}{index}]\ntext_en: {text_en}\nevidence:\n{evidence}")
+        evidence = EVIDENCE_SEPARATOR.join(quotes) or "(none)"
+        parts.append(
+            f"{SENTENCE_BLOCK_PREFIX}{index}]\ntext_en: {text_en}{EVIDENCE_BLOCK_PREFIX}{evidence}"
+        )
     return "\n\n".join(parts)
 
 

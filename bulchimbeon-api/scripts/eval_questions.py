@@ -43,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
 from app.config import settings  # noqa: E402
 from app.database import AsyncSessionLocal  # noqa: E402
+from app.models.document import Chunk  # noqa: E402
 from app.models.event import Event  # noqa: E402
 from app.models.notification import Notification  # noqa: E402
 from app.models.project import (  # noqa: E402
@@ -239,7 +240,8 @@ async def _top_citation_heading(db: AsyncSession, question_id: UUID) -> str:
     """
     row = (
         await db.execute(
-            select(AnswerCitation.quote)
+            select(Chunk.meta)
+            .join(AnswerCitation, AnswerCitation.chunk_id == Chunk.id)
             .join(Answer, Answer.id == AnswerCitation.answer_id)
             .where(Answer.question_id == question_id)
             .order_by(AnswerCitation.similarity.desc())
@@ -248,9 +250,10 @@ async def _top_citation_heading(db: AsyncSession, question_id: UUID) -> str:
     ).first()
     if row is None:
         return "—"
-    # 청크 본문은 헤딩 줄로 시작한다 (`utils/chunking._split_by_headings`).
-    first_line = row.quote.splitlines()[0].strip()
-    return first_line.lstrip("#").strip()[:28]
+    # ⚠️ 섹션명은 **청크의 `meta.heading_path`** 에서 온다. `citations[].quote` 로 되짚지
+    #    않는다 — 그것은 ⑤ 가 지목한 근거 문장이라 청크 머리의 헤딩 줄이 들어 있지 않다.
+    heading = " > ".join(row.meta.get("heading_path") or [])
+    return heading[:28] or "—"
 
 
 async def _purge(db: AsyncSession, question_ids: list[UUID]) -> None:

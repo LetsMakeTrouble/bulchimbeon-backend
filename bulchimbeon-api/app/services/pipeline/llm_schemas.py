@@ -80,6 +80,12 @@ class SentenceVerdict(BaseModel):
     index: int
     supported: bool
 
+    # ⑤ 는 판정하려고 이미 근거 문장을 찾은 상태다. 그것을 돌려받아 `citations[].quote`
+    # 로 저장한다 — 호출은 늘지 않고 화면 인용이 청크 앞 500자에서 실제 근거 문장이 된다.
+    # ⛔ 기본값 금지. 근거가 없으면 모델이 빈 문자열을 명시적으로 채운다.
+    #    지어낸 문장을 그대로 믿지 않는다 — 청크 실재 검증은 `answer._citation_quote`.
+    quote: str
+
 
 class VerdictsOut(BaseModel):
     """⑤ 근거 검증 결과 (`06 §2` ⑤).

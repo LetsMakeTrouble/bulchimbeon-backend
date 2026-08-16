@@ -54,8 +54,14 @@ def _fake_tokens(text: str) -> int:
 _MARKER_RE = re.compile(r"\[\[fake:([^\]]*)\]\]")
 _ALIAS_RE = re.compile(r"\bch-\d+\b")
 
+
 # ⑤ 프롬프트의 문장 블록 머리말. answer.py 와 이 파일이 공유하는 유일한 포맷 계약이다.
 SENTENCE_BLOCK_PREFIX = "[SENTENCE "
+
+# 그 블록 안의 인용 청크 구분자. ⑤ 가 `quote` 로 **청크의 실제 부분 문자열**을 돌려줘야
+# 하므로(`answer._citation_quote`), 가짜 프로바이더도 여기서 청크 원문을 되짚어야 한다.
+EVIDENCE_BLOCK_PREFIX = "\nevidence:\n- "
+EVIDENCE_SEPARATOR = "\n- "
 
 # ④ 가 만드는 문장의 접두사. ⑤ 가 이것만 보고 supported 를 결정한다.
 SUPPORTED_PREFIX = "Supported"
@@ -68,6 +74,19 @@ LESSON_CORRECTED_PREFIX = "[CORRECTED ANSWER] "
 # 마커 없이 뽑힌 교훈의 접두사. 같은 수정답이면 같은 교훈이 나와야 `content_hash` 대조(D8)로
 # 삭제 교훈 재생성 차단(`06 §5` 테스트 8)을 검증할 수 있다.
 LESSON_TEXT_PREFIX = "Lesson from correction: "
+
+
+def _evidence_quote(block: str) -> str:
+    """⑤ 블록의 첫 인용 청크에서 **마지막 한 문장**을 그대로 떼어낸다.
+
+    실 LLM 이 하는 일(근거 문장 지목)의 최소 흉내다. 지어낸 문자열을 돌려주면
+    `answer._citation_quote` 의 실재 검증에 걸려 폴백(청크 앞부분)만 계속 타게 되고,
+    그러면 인용 경로가 테스트에서 통째로 죽는다 — 반드시 실제 부분 문자열이어야 한다.
+    **마지막** 문장을 고르는 이유는 청크 앞부분 폴백과 결과가 겹치지 않게 하기 위해서다.
+    """
+    _, _, evidence = block.partition(EVIDENCE_BLOCK_PREFIX)
+    content = evidence.split(EVIDENCE_SEPARATOR)[0].strip()
+    return content.rsplit(". ", 1)[-1]
 
 
 def deterministic_embedding(text: str, dim: int = EMBEDDING_DIM_FIXED) -> list[float]:
@@ -275,9 +294,14 @@ class FakeLLMProvider:
         제외된 문장은 애초에 이 프롬프트에 들어오지 않는다 (`06 §2` ⑤ "자동 false").
         """
         blocks = user.split(SENTENCE_BLOCK_PREFIX)[1:]
-        return {
-            "verdicts": [
-                {"index": index, "supported": UNSUPPORTED_PREFIX not in block}
-                for index, block in enumerate(blocks, start=1)
-            ]
-        }
+        verdicts: list[dict[str, Any]] = []
+        for index, block in enumerate(blocks, start=1):
+            supported = UNSUPPORTED_PREFIX not in block
+            verdicts.append(
+                {
+                    "index": index,
+                    "supported": supported,
+                    "quote": _evidence_quote(block) if supported else "",
+                }
+            )
+        return {"verdicts": verdicts}

@@ -52,8 +52,9 @@ _DEPLOY_ROOT = "배포 구성"
 #
 # ⚠️ 여기를 실측과 어긋나게 두면 `report_grades` 가 매번 "기대 등급 밖" 을 찍는다.
 # 발표 전날 밤에 **없는 문제**를 쫓게 되는 자리다.
-# 실측(2026-08-16, 언어별 검색 축 · 기본 임계값): S 92~100 이 _GREEN, 59~78 이 _MIXED 다.
-# ⚠️ Q1 은 78 로 초록 하한(80) 바로 아래다 — 🟡 이 나오는 것이 사양대로다.
+# 실측 정본은 **이력 109건의 실제 등급 분포**다 (2026-08-16, 🟢 58 · 🟡 39 · 🔴 12).
+# probe 의 S 만 보고 정하지 마라 — 매칭률은 min(S, G) 라 G 가 한 칸 내리는 계열이 있다.
+# Q4 는 14건 중 11건, Q5 는 13건 중 5건, Q9 는 11건 중 4건이 🟡 이라 _MIXED 로 둔다.
 _GREEN = (GRADE_GREEN,)
 _MIXED = (GRADE_GREEN, GRADE_YELLOW)
 
@@ -86,7 +87,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q4",
         content_ko="담당자 확인 카드 인박스 화면의 경로가 무엇인가요?",
-        expected_grades=_GREEN,
+        expected_grades=_MIXED,
         evidence_doc=FRONTEND_GUIDE,
         evidence_heading=(_GUIDE_ROOT, "Routes and Screens"),
         note="`/inbox`. 경로 목록이 한 청크에 모여 있어 S 가 높게 나오는 계열이다.",
@@ -94,7 +95,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q5",
         content_ko="노란색 등급 답변은 질문자 화면에 어떻게 표시되나요?",
-        expected_grades=_GREEN,
+        expected_grades=_MIXED,
         evidence_doc=FRONTEND_GUIDE,
         evidence_heading=(_GUIDE_ROOT, "Grade Badges and Cross-check Controls"),
         note="답변은 주되 '담당자 확인 대기' 뱃지가 붙는다.",
@@ -126,7 +127,7 @@ CANONICAL: tuple[DemoQuestion, ...] = (
     DemoQuestion(
         key="Q9",
         content_ko="확정된 공식 Q&A 를 재사용할 때 한국어 원문을 다시 번역하나요?",
-        expected_grades=_GREEN,
+        expected_grades=_MIXED,
         evidence_doc=BACKEND_PIPELINE,
         evidence_heading=(_PIPELINE_ROOT, "재사용 판정"),
         note="재번역하지 않는다 — 승인된 문장이 매번 달라지면 안 되기 때문이다.",

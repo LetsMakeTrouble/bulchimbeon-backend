@@ -206,10 +206,15 @@ class QuestionDetail(BaseModel):
 
 
 class QuestionListItem(BaseModel):
-    """`05 §6` 목록 아이템 — **이것만으로 질문자 채팅 목록을 그릴 수 있다.**"""
+    """`05 §6` 목록 아이템 — **이것만으로 질문자 채팅 목록을 그릴 수 있다.**
+
+    `asked_by` 는 담당자의 전체 목록에서 행 단위로 질문자를 구분하기 위한 것이다.
+    상세의 `asked_by` 와 동일 shape 이며, 하위호환 **추가** 필드다.
+    """
 
     id: UUID
     content_ko: str
+    asked_by: AskedBy
     status: QuestionStatus
     grade: Grade | None
     matching_rate: int | None

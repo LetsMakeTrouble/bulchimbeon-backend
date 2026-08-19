@@ -248,18 +248,22 @@
 {
   "items": [
     { "id":"q-9", "content_ko":"환불 정책이 일본 리전에도 동일하게 적용되나요?",
+      "asked_by": {"id":"u-1","name":"지수"},
       "status":"held", "grade":"red", "matching_rate":null, "state":null,
       "created_at":"2026-08-06T01:10:22Z",
       "feedback_summary": null },
     { "id":"q-8", "content_ko":"일본 리전 환불 정책도 동일하게 적용되나요?",
+      "asked_by": {"id":"u-2","name":"민준"},
       "status":"answered", "grade":"green", "matching_rate":null, "state":"verified",
       "created_at":"2026-08-06T02:40:00Z",
       "feedback_summary": { "correct":0, "different":0, "my_feedback":null } },
     { "id":"q-5", "content_ko":"부분 환불도 30일 안에 신청해야 하나요?",
+      "asked_by": {"id":"u-1","name":"지수"},
       "status":"answered", "grade":"yellow", "matching_rate":65, "state":"draft",
       "created_at":"2026-08-06T00:55:10Z",
       "feedback_summary": { "correct":0, "different":0, "my_feedback":null } },
     { "id":"q-7", "content_ko":"레이트 리밋은 분당 몇 건인가요?",
+      "asked_by": {"id":"u-2","name":"민준"},
       "status":"processing", "grade":null, "matching_rate":null, "state":null,
       "created_at":"2026-08-06T01:01:55Z", "feedback_summary":null }
   ],
@@ -269,6 +273,7 @@
 
 | 필드 | 설명 |
 | --- | --- |
+| `asked_by` | 질문자 `{id, name}` — 상세의 `asked_by`와 동일 shape. 담당자 전체 목록에서 행 단위로 질문자를 구분한다 |
 | `status` | `processing` \| `answered` \| `held` \| `failed` (§1.3) |
 | `grade` | `processing`이면 `null`. `held`면 `"red"` |
 | `matching_rate` | `held`·`processing`·재사용 답변이면 `null` |

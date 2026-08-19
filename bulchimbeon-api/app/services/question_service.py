@@ -203,9 +203,11 @@ async def list_questions(
     summaries = await feedback_service.summaries_for_answers(
         db, [answer.id for answer in answers.values()], viewer_id=member.user_id
     )
+    asker_names = await _asker_names(db, {question.asker_id for question in questions})
     return QuestionListResponse(
         items=[
-            _to_list_item(question, answers.get(question.id), summaries) for question in questions
+            _to_list_item(question, answers.get(question.id), summaries, asker_names)
+            for question in questions
         ],
         total=total,
         limit=limit,
@@ -220,10 +222,19 @@ async def _answers_by_question(db: AsyncSession, question_ids: list[UUID]) -> di
     return {answer.question_id: answer for answer in rows}
 
 
+async def _asker_names(db: AsyncSession, asker_ids: set[UUID]) -> dict[UUID, str]:
+    """목록 `asked_by` 용 — 페이지의 질문자 이름을 IN 한 방으로 가져온다 (N+1 금지)."""
+    if not asker_ids:
+        return {}
+    rows = await db.execute(select(User.id, User.name).where(User.id.in_(asker_ids)))
+    return {user_id: name for user_id, name in rows}
+
+
 def _to_list_item(
     question: Question,
     answer: Answer | None,
     summaries: dict[UUID, FeedbackSummary],
+    asker_names: dict[UUID, str],
 ) -> QuestionListItem:
     """`05 §6` 목록 아이템 표.
 
@@ -247,6 +258,8 @@ def _to_list_item(
     return QuestionListItem(
         id=question.id,
         content_ko=question.content_ko,
+        # 상세(`get_detail`)와 같은 규약 — 유저 행이 사라진 경우만 빈 이름이다.
+        asked_by=AskedBy(id=question.asker_id, name=asker_names.get(question.asker_id, "")),
         status=question.status,
         mode=question.mode,
         grade=grade,

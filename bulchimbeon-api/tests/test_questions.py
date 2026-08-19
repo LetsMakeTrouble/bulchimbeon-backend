@@ -15,6 +15,7 @@ from tests.pipeline_helpers import ask, embedding_with_cosine, seed_document
 LIST_ITEM_KEYS = {
     "id",
     "content_ko",
+    "asked_by",
     "status",
     "mode",
     "grade",
@@ -168,6 +169,11 @@ async def test_asker_sees_only_own_questions_and_answerer_sees_all(
 
     assert mine.json()["total"] == 1
     assert everything.json()["total"] == 2
+
+    # 담당자 전체 목록에는 행마다 질문자가 붙는다 (`05 §6` `asked_by` — 상세와 동일 shape).
+    asked_by = {item["content_ko"]: item["asked_by"] for item in everything.json()["items"]}
+    assert asked_by["질문자 A 의 질문"] == {"id": team.asker.id, "name": "지수"}
+    assert asked_by["질문자 B 의 질문"] == {"id": team.other.id, "name": "민준"}
 
     # 담당자도 `mine=true` 로 자기 것만 볼 수 있다(담당자는 질문할 수 없으므로 0건이다).
     owner_mine = await client.get(

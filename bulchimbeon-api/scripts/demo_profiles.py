@@ -75,6 +75,16 @@ class DemoProfile:
     #    `similarity_floor` 를 낮춰야 하는 경우가 이 필드의 존재 이유다 — 낮추기 전에
     #    `probe_seed_docs.py` 로 실제 S 분포를 먼저 재라.
     settings_overrides: dict[str, float] = field(default_factory=dict)
+    # 시드가 끝난 프로젝트의 **관리자로 앉힐 계정**. 이 도메인의 관리자는 담당자(answerer)다 —
+    # 역할 enum 에 admin 이 따로 없고(`04 §2` — `role IN ('answerer','asker')`),
+    # 전체 질문·카드 큐·설정을 보는 쪽은 담당자뿐이다.
+    #
+    # ⚠️ `answerer` 를 직접 바꾸지 않고 이 필드를 쓰는 이유: `answerer` 는 이력의 주인공이다.
+    #    픽스처(`seed/<프로필>/history.json`)의 카드 확정·알림·이벤트가 전부 그 이메일을
+    #    가리키므로, 계정을 갈아치우면 픽스처가 "픽스처가 가리키는 유저가 없다" 로 죽는다.
+    #    대신 시드 마지막에 이 계정을 멤버로 넣고 `transfer_answerer`(D16) 로 담당자를 넘긴다 —
+    #    구담당자는 질문자로 남아 이력이 그대로 이어진다.
+    admin: DemoUser | None = None
 
     @property
     def canonical_texts(self) -> frozenset[str]:
@@ -166,6 +176,10 @@ BULCHIMBEON = DemoProfile(
     # ⛔ 이 값은 **시드가 쓰는 한도**다. 발표 당일 라이브 질문은 API 서버 프로세스에서
     #    별도로 세므로 여기 올린다고 라이브가 위험해지지 않는다.
     settings_overrides={"daily_llm_call_limit": 1000},
+    # 데모 관리자 계정(mike)이 이 프로젝트도 담당자로 관리한다 — 로그인 하나로 두 데모의
+    # 관리자 화면(전체 질문 115건 + 작성자, 카드 인박스)을 모두 보여 주기 위해서다.
+    # Alex 는 질문자로 남는다 (`ensure_admin` — 픽스처의 이력 주인이라 유저를 지우면 안 된다).
+    admin=GLOBALMART.answerer,
     #
     # 한때 여기에 `similarity_floor` 0.325 를 넣었다. 한국어 문서를 영어 질의로만 찾던
     # 시절의 보정이었는데, 검색이 언어별 축으로 바뀌면서(0013 · `retrieval.search_evidence`)

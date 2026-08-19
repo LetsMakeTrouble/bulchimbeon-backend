@@ -74,7 +74,12 @@ from app.models.lesson import Lesson  # noqa: E402
 from app.models.llm_usage import LLMUsage  # noqa: E402
 from app.models.notification import Notification  # noqa: E402
 from app.models.official_qa import OfficialQA  # noqa: E402
-from app.models.project import Guideline, Project, ProjectMember  # noqa: E402
+from app.models.project import (  # noqa: E402
+    MEMBER_STATUS_ACTIVE,
+    Guideline,
+    Project,
+    ProjectMember,
+)
 from app.models.question import (  # noqa: E402
     ANSWER_SOURCE_REUSED,
     ANSWER_STATE_DRAFT,
@@ -314,6 +319,46 @@ async def build_project(
 
     log(f"· 프로젝트 '{project.name}' 생성 (invite_code={project.invite_code})")
     return project
+
+
+async def ensure_admin(db: AsyncSession, project: Project, profile: DemoProfile) -> None:
+    """`profile.admin` 을 프로젝트의 담당자(=이 도메인의 관리자)로 앉힌다. 재실행 멱등.
+
+    역할 enum 에 admin 이 없으므로(`04 §2`) "관리자" 는 곧 담당자다 — 전체 질문·작성자·
+    카드 큐를 보는 유일한 역할. 담당자는 프로젝트당 1명이라(부분 UNIQUE) 앉히는 방법은
+    추가가 아니라 **교체**다.
+
+    ⚠️ 역할 스왑은 단일 UPDATE 가 아니라 `transfer_answerer` 의 4문 절차다 — 부분 UNIQUE 는
+    DEFERRABLE 이 아니다 (`04 §7`, D16). 구담당자는 질문자로 프로젝트에 남는다 —
+    픽스처의 카드 확정·알림이 그 계정을 가리키므로 지우면 이력이 깨진다.
+    """
+    if profile.admin is None:
+        return
+
+    admin = await ensure_user(db, profile.admin)
+    await db.commit()
+    if project.answerer_id == admin.id:
+        log(f"· 관리자 확인: {admin.email} 이 이미 담당자다")
+        return
+
+    member = await db.scalar(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id == admin.id,
+        )
+    )
+    if member is None or member.status != MEMBER_STATUS_ACTIVE:
+        await project_service.join_by_invite_code(db, admin, project.invite_code)
+
+    previous = await db.get(User, project.answerer_id)
+    await project_service.transfer_answerer(
+        db,
+        project,
+        actor=previous if previous is not None else admin,
+        new_answerer_id=admin.id,
+    )
+    await db.commit()
+    log(f"· 관리자 지정: {admin.email} → '{project.name}' 담당자 (구담당자는 질문자로 남는다)")
 
 
 async def upload_seed_documents(
@@ -851,6 +896,7 @@ async def main(argv: list[str] | None = None) -> int:
         project = await build_project(db, answerer, askers, profile)
         await upload_seed_documents(db, project, answerer, profile)
         await assert_chunk_count(db, project, profile)
+        await ensure_admin(db, project, profile)
 
         if args.from_fixture is not None:
             path = (

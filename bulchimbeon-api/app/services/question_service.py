@@ -19,6 +19,7 @@ from app.models.question import (
     ANSWER_SOURCE_REUSED,
     ANSWER_STATE_DRAFT,
     GRADE_RED,
+    QUESTION_MODE_CONVERSATION,
     QUESTION_STATUS_ANSWERED,
     QUESTION_STATUS_FAILED,
     QUESTION_STATUS_HELD,
@@ -102,14 +103,21 @@ def _localized(table: dict[str, str], language: str) -> str:
 async def create_question(
     db: AsyncSession, *, project_id: UUID, asker: User, payload: QuestionCreate
 ) -> Question:
-    """질문 접수. 파이프라인은 라우터가 BackgroundTasks 로 띄운다 (D3 — 202 즉시 반환)."""
+    """질문 접수. 파이프라인은 라우터가 BackgroundTasks 로 띄운다 (D3 — 202 즉시 반환).
+
+    대화모드는 AI 답변 대상이 아니므로 **`processing` 을 거치지 않고 즉시 `answered`** 다.
+    파이프라인·좀비 회수의 대상 조건이 전부 `status='processing'` 이라, 상태만으로도
+    모든 답변 트리거 경로에서 제외된다 (`pipeline/answer._pipeline` 의 mode 가드가 2중 방어).
+    """
+    conversation = payload.mode == QUESTION_MODE_CONVERSATION
     question = Question(
         project_id=project_id,
         asker_id=asker.id,
         content_ko=payload.content_ko,
         urgency=payload.urgency,
         suggest_urgent=False,  # ① 이 채운다 (`06 §2` ①)
-        status=QUESTION_STATUS_PROCESSING,
+        status=QUESTION_STATUS_ANSWERED if conversation else QUESTION_STATUS_PROCESSING,
+        mode=payload.mode,
     )
     db.add(question)
     await db.flush()
@@ -121,7 +129,7 @@ async def create_question(
         actor_id=asker.id,
         entity_type=event_service.ENTITY_QUESTION,
         entity_id=question.id,
-        payload={"urgency": question.urgency},
+        payload={"urgency": question.urgency, "mode": question.mode},
     )
     return question
 
@@ -240,6 +248,7 @@ def _to_list_item(
         id=question.id,
         content_ko=question.content_ko,
         status=question.status,
+        mode=question.mode,
         grade=grade,
         matching_rate=answer.matching_rate if published and answer is not None else None,
         state=answer.state if published and answer is not None else None,
@@ -293,6 +302,7 @@ async def get_detail(db: AsyncSession, question: Question, viewer: User) -> Ques
         content_en=question.content_en,
         urgency=question.urgency,
         status=question.status,
+        mode=question.mode,
         asked_by=AskedBy(id=question.asker_id, name=asker.name if asker else ""),
         answer=answer_out,
         similar_official_qa=await _similar_official_qa(db, answer),

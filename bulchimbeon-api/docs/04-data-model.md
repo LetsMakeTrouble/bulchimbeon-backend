@@ -109,6 +109,7 @@ erDiagram
 | urgency | text | `normal` \| `urgent` (질문자 지정) |
 | suggest_urgent | bool | AI 제안 플래그 (D10) |
 | status | text | `processing` \| `answered` \| `held` \| `failed` |
+| mode | text | `question` \| `conversation` (기본 `question`). 대화모드는 AI 답변 대상이 아니다 — 접수 즉시 `answered`, `processing` 을 거치지 않는다 (`05 §6`) |
 
 ### answers
 | id | uuid PK | |

@@ -25,6 +25,7 @@ from app.core.deps import (
 )
 from app.database import get_db
 from app.models.project import ProjectMember
+from app.models.question import QUESTION_MODE_QUESTION
 from app.models.user import User
 from app.schemas.question import (
     FeedbackCreate,
@@ -70,12 +71,16 @@ async def create_question(
     accepted = QuestionAccepted(
         question_id=question.id,
         status=question.status,
+        mode=question.mode,
         suggest_urgent=question.suggest_urgent,
         created_at=question.created_at,
     )
     await db.commit()
 
-    background_tasks.add_task(run_answer_pipeline, question.id)
+    # 대화모드는 AI 답변 대상이 아니다 — 태스크 자체를 띄우지 않는다 (`05 §6`).
+    # 다른 트리거 경로(스크립트·재실행)는 `_pipeline` 의 mode 가드가 막는다.
+    if question.mode == QUESTION_MODE_QUESTION:
+        background_tasks.add_task(run_answer_pipeline, question.id)
     return accepted
 
 

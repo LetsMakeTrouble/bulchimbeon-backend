@@ -16,6 +16,7 @@ LIST_ITEM_KEYS = {
     "id",
     "content_ko",
     "status",
+    "mode",
     "grade",
     "matching_rate",
     "state",
@@ -74,8 +75,10 @@ async def test_accepted_response_shape(client: AsyncClient, team: Fixture) -> No
 
     assert response.status_code == 202, response.text
     body = response.json()
-    assert set(body) == {"question_id", "status", "suggest_urgent", "created_at"}
+    assert set(body) == {"question_id", "status", "mode", "suggest_urgent", "created_at"}
     assert body["status"] == "processing"
+    # `mode` 를 생략하면 기존 동작(질문모드) 그대로다 — 하위호환 (`05 §6`).
+    assert body["mode"] == "question"
 
 
 async def test_non_member_cannot_ask(client: AsyncClient, team: Fixture) -> None:
@@ -252,6 +255,7 @@ async def test_detail_shape(client: AsyncClient, db_session: AsyncSession, team:
         "content_en",
         "urgency",
         "status",
+        "mode",
         "asked_by",
         "answer",
         "similar_official_qa",

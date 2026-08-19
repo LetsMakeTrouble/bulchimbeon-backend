@@ -43,6 +43,7 @@ from app.models.question import (
     HELD_REASON_NO_EVIDENCE,
     HELD_REASON_QUOTA_EXCEEDED,
     HELD_REASON_SCHEMA_FAILED,
+    QUESTION_MODE_CONVERSATION,
     QUESTION_STATUS_ANSWERED,
     QUESTION_STATUS_FAILED,
     QUESTION_STATUS_HELD,
@@ -329,6 +330,13 @@ async def _pipeline(db: AsyncSession, question_id: UUID) -> _Outcome | None:
     question = await db.get(Question, question_id)
     if question is None:
         logger.warning("파이프라인 대상 질문이 없다: %s", question_id)
+        return None
+    if question.mode == QUESTION_MODE_CONVERSATION:
+        # 대화모드에는 AI 가 답변하지 않는다 (`05 §6`). 모든 트리거 경로(라우터 BackgroundTasks·
+        # seed/eval/smoke 스크립트·향후 재실행)가 이 함수를 지나므로 가드는 여기 한 곳이다.
+        # 접수 시 `answered` 로 만들어 `processing` 을 거치지 않으니 좀비 회수(`sweeper_service`,
+        # `status='processing'` 대상)도 건드리지 못한다.
+        logger.info("대화모드 질문 — 답변 파이프라인 대상이 아니다: %s", question_id)
         return None
     if question.status != QUESTION_STATUS_PROCESSING:
         # 이미 처리된 질문. `answers` 의 UNIQUE(question_id) 와 함께 재실행을 막는다.

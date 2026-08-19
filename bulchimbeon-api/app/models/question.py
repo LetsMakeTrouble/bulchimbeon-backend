@@ -33,6 +33,13 @@ URGENCY_NORMAL = "normal"
 URGENCY_URGENT = "urgent"
 URGENCIES = (URGENCY_NORMAL, URGENCY_URGENT)
 
+# 대화모드 질문에는 AI 가 답변하지 않는다 (`05 §6`). 접수 즉시 `answered` 로 만들어
+# `processing` 을 거치지 않는다 — 파이프라인·좀비 회수의 모든 대상 조건이 `processing`
+# 이므로 상태만으로도 전 경로에서 제외된다 (`pipeline/answer._pipeline` 의 가드가 2중 방어).
+QUESTION_MODE_QUESTION = "question"
+QUESTION_MODE_CONVERSATION = "conversation"
+QUESTION_MODES = (QUESTION_MODE_QUESTION, QUESTION_MODE_CONVERSATION)
+
 QUESTION_STATUS_PROCESSING = "processing"
 QUESTION_STATUS_ANSWERED = "answered"
 QUESTION_STATUS_HELD = "held"
@@ -91,6 +98,10 @@ class Question(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "status IN ('processing', 'answered', 'held', 'failed')",
             name="ck_questions_status",
         ),
+        CheckConstraint(
+            "mode IN ('question', 'conversation')",
+            name="ck_questions_mode",
+        ),
     )
 
     project_id: Mapped[uuid.UUID] = mapped_column(
@@ -114,6 +125,9 @@ class Question(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'processing'"))
+
+    # 대화모드는 AI 답변 대상이 아니다. 기본값이 `question` 이라 기존 행·기존 호출은 그대로다.
+    mode: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'question'"))
 
 
 class Answer(UUIDPrimaryKeyMixin, TimestampMixin, Base):

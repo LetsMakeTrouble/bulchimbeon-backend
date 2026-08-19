@@ -216,10 +216,11 @@
 
 ### POST `/projects/{id}/questions` — 질문 접수 (asker)
 ```json
-// 요청
-{ "content_ko": "환불 정책이 일본 리전에도 동일하게 적용되나요?", "urgency": "normal" }
+// 요청 — `mode` 는 선택 필드이며 기본값 "question" (생략 = 기존 동작 그대로)
+{ "content_ko": "환불 정책이 일본 리전에도 동일하게 적용되나요?", "urgency": "normal",
+  "mode": "question" }
 // 202 응답 — 파이프라인 비동기 시작 (등급 확정 목표 ≤25초 = LLM_PIPELINE_DEADLINE_SECONDS)
-{ "question_id": "q-9", "status": "processing", "suggest_urgent": false,
+{ "question_id": "q-9", "status": "processing", "mode": "question", "suggest_urgent": false,
   "created_at": "2026-08-06T01:10:22Z" }
 ```
 - **`created_at`은 진행 표시 전용이다.** 프론트는 `now - created_at`으로 경과 초를 그리되, 예산은 `LLM_PIPELINE_DEADLINE_SECONDS`(기본 25초) 기준으로 한다
@@ -228,6 +229,22 @@
 - 완료 시 SSE `answer.completed` 수신 → `GET /questions/{id}` 재조회. (SSE 미사용 시 2~3초 폴링)
 - **담당자 권한 주의**(D17): 담당자는 자기 프로젝트에 질문할 수 없다. 담당자 계정으로 이 화면에 진입할 수 없도록
   프론트가 입력창을 감추되, 서버도 403으로 막는다.
+
+#### 대화모드 (`mode: "conversation"`)
+```json
+// 요청
+{ "content_ko": "다들 오늘 배포 고생 많았어요!", "mode": "conversation" }
+// 202 응답 — 파이프라인이 없으므로 status 가 즉시 "answered" 다
+{ "question_id": "q-10", "status": "answered", "mode": "conversation",
+  "suggest_urgent": false, "created_at": "2026-08-06T01:12:00Z" }
+```
+- **대화모드 질문에는 AI 가 답변하지 않는다.** 답변 파이프라인이 시작되지 않고, 만료 스위퍼·좀비 회수 등
+  어떤 경로에서도 답변이 생성되거나 `failed` 로 회수되지 않는다.
+- `status` 는 접수 즉시 `answered` 이고 **`answer` 는 항상 `null`** 이다. `content_en`·`suggest_urgent` 도
+  채워지지 않는다 (파이프라인 ① 이 없다). SSE `answer.completed` 도 오지 않는다 — 202 가 끝이다.
+- `processing` 창이 없으므로 `PATCH /questions/{id}`(긴급도 변경)는 항상 409 `PIPELINE_IN_PROGRESS` 다.
+- `mode` 는 목록·상세 응답에 항상 내려간다. 프론트는 `mode == "conversation"` 이면 답변 영역 없이
+  채팅 말풍선으로만 렌더한다.
 
 ### PATCH `/questions/{id}` — 긴급도 변경 (질문 작성자)
 ```json
@@ -248,19 +265,22 @@
 {
   "items": [
     { "id":"q-9", "content_ko":"환불 정책이 일본 리전에도 동일하게 적용되나요?",
-      "status":"held", "grade":"red", "matching_rate":null, "state":null,
+      "status":"held", "mode":"question", "grade":"red", "matching_rate":null, "state":null,
       "created_at":"2026-08-06T01:10:22Z",
       "feedback_summary": null },
     { "id":"q-8", "content_ko":"일본 리전 환불 정책도 동일하게 적용되나요?",
-      "status":"answered", "grade":"green", "matching_rate":null, "state":"verified",
+      "status":"answered", "mode":"question", "grade":"green", "matching_rate":null, "state":"verified",
       "created_at":"2026-08-06T02:40:00Z",
       "feedback_summary": { "correct":0, "different":0, "my_feedback":null } },
     { "id":"q-5", "content_ko":"부분 환불도 30일 안에 신청해야 하나요?",
-      "status":"answered", "grade":"yellow", "matching_rate":65, "state":"draft",
+      "status":"answered", "mode":"question", "grade":"yellow", "matching_rate":65, "state":"draft",
       "created_at":"2026-08-06T00:55:10Z",
       "feedback_summary": { "correct":0, "different":0, "my_feedback":null } },
+    { "id":"q-10", "content_ko":"다들 오늘 배포 고생 많았어요!",
+      "status":"answered", "mode":"conversation", "grade":null, "matching_rate":null, "state":null,
+      "created_at":"2026-08-06T01:12:00Z", "feedback_summary":null },
     { "id":"q-7", "content_ko":"레이트 리밋은 분당 몇 건인가요?",
-      "status":"processing", "grade":null, "matching_rate":null, "state":null,
+      "status":"processing", "mode":"question", "grade":null, "matching_rate":null, "state":null,
       "created_at":"2026-08-06T01:01:55Z", "feedback_summary":null }
   ],
   "total": 12, "limit": 20, "offset": 0
@@ -270,6 +290,7 @@
 | 필드 | 설명 |
 | --- | --- |
 | `status` | `processing` \| `answered` \| `held` \| `failed` (§1.3) |
+| `mode` | `question` \| `conversation`. 대화모드는 답변 없이 `status:"answered"` 로 내려온다 |
 | `grade` | `processing`이면 `null`. `held`면 `"red"` |
 | `matching_rate` | `held`·`processing`·재사용 답변이면 `null` |
 | `state` | **발행된 답변이 없으면 `null`** (🔴 보류·처리 중 포함 — 🔴 초안은 카드에서만 노출된다). 있으면 `answer.state` |
@@ -280,7 +301,8 @@
 {
   "id": "q-5", "content_ko": "부분 환불도 30일 안에 신청해야 하나요?",
   "content_en": "Does a partial refund also have to be requested within 30 days?",
-  "urgency": "normal", "status": "answered", "asked_by": {"id":"u-1","name":"지수"},
+  "urgency": "normal", "status": "answered", "mode": "question",
+  "asked_by": {"id":"u-1","name":"지수"},
   "answer": {
     "id": "a-5", "grade": "yellow", "state": "draft",
     "matching_rate": 65, "search_score": 65, "grounding_score": 100,

@@ -18,11 +18,14 @@ Grade = Literal["green", "yellow", "red"]
 QuestionStatus = Literal["processing", "answered", "held", "failed"]
 AnswerState = Literal["draft", "verified", "under_review", "expired", "rejected"]
 HeldReason = Literal["conflict", "no_evidence", "low_confidence", "schema_failed", "quota_exceeded"]
+QuestionMode = Literal["question", "conversation"]
 
 
 class QuestionCreate(BaseModel):
     content_ko: str = Field(min_length=1, max_length=MAX_QUESTION_LENGTH)
     urgency: Urgency = "normal"
+    # 대화모드는 AI 답변 파이프라인을 타지 않는다 (`05 §6`). 기본값이 질문모드라 하위호환이다.
+    mode: QuestionMode = "question"
 
 
 class QuestionAccepted(BaseModel):
@@ -31,10 +34,13 @@ class QuestionAccepted(BaseModel):
     ⚠️ `suggest_urgent` 는 **접수 시점의 값**이라 항상 `false` 다. 이 플래그를 만드는 것은
     파이프라인 ① 이고(`06 §2` ①), D3 가 즉시 반환을 요구하므로 202 는 ① 을 기다리지 않는다.
     파이프라인이 채운 값은 `questions.suggest_urgent` 에 남는다.
+
+    대화모드(`mode="conversation"`)는 파이프라인이 없으므로 `status` 가 즉시 `answered` 다.
     """
 
     question_id: UUID
     status: QuestionStatus
+    mode: QuestionMode
     suggest_urgent: bool
     created_at: datetime
 
@@ -198,6 +204,7 @@ class QuestionDetail(BaseModel):
     content_en: str | None
     urgency: Urgency
     status: QuestionStatus
+    mode: QuestionMode
     asked_by: AskedBy
     answer: AnswerOut | None
     similar_official_qa: SimilarOfficialQA | None
@@ -211,6 +218,7 @@ class QuestionListItem(BaseModel):
     id: UUID
     content_ko: str
     status: QuestionStatus
+    mode: QuestionMode
     grade: Grade | None
     matching_rate: int | None
     state: AnswerState | None

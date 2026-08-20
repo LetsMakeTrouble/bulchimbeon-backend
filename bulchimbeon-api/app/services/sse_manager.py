@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-# `05 §12.3` 이벤트 9종. **계약서에 없는 이벤트명을 새로 만들지 않는다.**
+# `05 §12.3` 이벤트 10종. **계약서에 없는 이벤트명을 새로 만들지 않는다.**
 SSE_ANSWER_COMPLETED = "answer.completed"
 SSE_ANSWER_UPDATED = "answer.updated"
 SSE_CARD_CREATED = "card.created"
@@ -49,6 +49,7 @@ SSE_NOTIFICATION_CREATED = "notification.created"
 # 엉뚱한 시점에 카운트가 날아간다. 유일한 생산자는 `sse_stream_service.stream` 이다.
 SSE_NOTIFICATION_UNREAD_COUNT = "notification.unread_count"
 SSE_SYNC_COMPLETED = "sync.completed"
+SSE_MESSAGE_CREATED = "message.created"
 
 # `05 §12.2` 5번 — 하트비트. §12.3 의 **데이터 이벤트가 아니다**(그래서 `SSE_EVENTS` 밖이다).
 #
@@ -69,6 +70,7 @@ SSE_EVENTS = (
     SSE_NOTIFICATION_CREATED,
     SSE_NOTIFICATION_UNREAD_COUNT,
     SSE_SYNC_COMPLETED,
+    SSE_MESSAGE_CREATED,
 )
 
 # `05 §12.2` — SSE 에는 **재생(replay) 계약이 없다.** 느린 클라이언트를 위해 큐를 무한히
@@ -304,6 +306,22 @@ def queue_briefing_ready(
         user_ids=[answerer_id],
         event=SSE_BRIEFING_READY,
         data={"project_id": str(project_id), "date": date},
+    )
+
+
+def queue_message_created(
+    db: AsyncSession, *, user_ids: Iterable[UUID | None], message_id: UUID, project_id: UUID
+) -> None:
+    """`message.created` `{message_id, project_id}` (수신자: 프로젝트 활성 멤버 전원).
+
+    발신자도 받는다 — `card.resolved` 와 같은 이유(다른 기기·다른 탭 동기화)다.
+    payload 는 id 위주다: 프론트는 수신 시 `GET /projects/{id}/messages` 를 재조회한다.
+    """
+    enqueue(
+        db,
+        user_ids=user_ids,
+        event=SSE_MESSAGE_CREATED,
+        data={"message_id": str(message_id), "project_id": str(project_id)},
     )
 
 

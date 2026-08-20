@@ -238,6 +238,7 @@ Rules:
 | --- | --- |
 | 카드 **승인** | answer `verified` → 공식 Q&A 편입(question ko/en + answer ko/en + 질문 임베딩) → 질문자 알림 |
 | 카드 **수정** (`content_en` 입력) | en→ko 번역 → **ko를 확정 원문으로 고정** (D5) → 공식 Q&A 편입 → 정정 알림(양쪽 언어) → **교훈 후보 추출** |
+| **담당자 직접 등록** (`05 §9` POST) | 편입 없이 공식 Q&A 생성 — 질문 번역은 ①과 같은 프롬프트, 임베딩은 ②와 같은 축(영어 번역문). `source_answer_id=NULL` |
 | 카드 **원안 유지** | `verified` 복귀 + 유지 사유 알림 |
 | 카드 **반려** | answer `rejected` + 사유 전달. 공식 Q&A 미편입 |
 | 카드 확정 (공통) | 질문 `held → answered` 전이 + `question.status_changed` 이벤트 (`04 §6.1`) (reject 제외 — reject는 held 유지, `05 §6`) |

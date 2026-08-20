@@ -1,4 +1,4 @@
-"""공식 Q&A 라우터 (`05 §9`) — 목록·상세는 멤버, 삭제는 담당자.
+"""공식 Q&A 라우터 (`05 §9`) — 목록·상세는 멤버, 등록·삭제는 담당자.
 
 ⚠️ `DELETE` 는 **물리 삭제가 아니라 `status='archived'` 전이**다. 이미 이 Q&A 를 근거로
 발행된 답변은 그대로 남는다 (이력 보존).
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import (
     OfficialQAAccess,
     get_current_user,
+    require_answerer,
     require_member,
     require_official_qa_answerer,
     require_official_qa_member,
@@ -21,12 +22,38 @@ from app.models.project import ProjectMember
 from app.models.user import User
 from app.schemas.official_qa import (
     OfficialQAArchived,
+    OfficialQACreate,
     OfficialQADetail,
     OfficialQAListResponse,
 )
 from app.services import official_qa_service
 
 router = APIRouter(tags=["official-qas"])
+
+
+@router.post(
+    "/projects/{project_id}/official-qas", response_model=OfficialQADetail, status_code=201
+)
+async def register_official_qa(
+    project_id: UUID,
+    body: OfficialQACreate,
+    member: ProjectMember = Depends(require_answerer),
+    db: AsyncSession = Depends(get_db),
+) -> OfficialQADetail:
+    """담당자 전용 — 편입 없이 확정 지식을 직접 등록한다 (`05 §9`).
+
+    서버가 en 번역과 질문 임베딩을 만들며, 등록 즉시 재사용(`06 §2` ②) 대상이다.
+    출처 두 필드(`source_answer_id`/`source_question_id`)는 `null` 이다.
+    """
+    official_qa = await official_qa_service.register_direct(
+        db,
+        project_id=project_id,
+        actor_id=member.user_id,
+        question_ko=body.question_ko,
+        answer_ko=body.answer_ko,
+    )
+    await db.commit()
+    return await official_qa_service.to_detail(db, official_qa)
 
 
 @router.get("/projects/{project_id}/official-qas", response_model=OfficialQAListResponse)

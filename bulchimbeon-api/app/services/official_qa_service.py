@@ -1,8 +1,10 @@
-"""공식 Q&A — 확정 지식의 편입·재검토·아카이브 (`06 §3`, `05 §9`).
+"""공식 Q&A — 확정 지식의 편입·직접 등록·재검토·아카이브 (`06 §3`, `05 §9`).
 
 > ### 지식 환류의 한 바퀴
 > 담당자 확정 → **편입**(`incorporate`) → 재사용(`06 §2` ②) → 문제 발생 시 **재검토**
 > (`suspend`) → 해소되면 **복귀**(`restore`). 원본 문서가 사라지면 **아카이브**(`archive`).
+> 편입을 거치지 않는 예외가 하나 있다 — 담당자 **직접 등록**(`register_direct`,
+> `05 §9` POST). `source_answer_id=NULL` 이 그 표식이다.
 
 ⚠️ `answer_ko` 가 "불변"이라는 말은 **서버가 영어 저장본을 다시 번역하지 않는다**는 뜻이다
 (룰 4·D5). 담당자가 재검토 카드에서 새로 써 넣는 것은 재번역이 아니라 새로운 확정이므로
@@ -22,7 +24,9 @@ from uuid import UUID
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings as env_settings
 from app.core.errors import NotFound
+from app.models.llm_usage import STEP_TRANSLATE
 from app.models.notification import NOTIFICATION_ANSWER_CORRECTED
 from app.models.official_qa import (
     OFFICIAL_QA_STATUS_ACTIVE,
@@ -45,6 +49,9 @@ from app.schemas.official_qa import (
 )
 from app.services import event_service, notification_service, sse_manager
 from app.services.llm import get_provider
+from app.services.llm import usage as llm_usage
+from app.services.pipeline import prompts
+from app.services.pipeline.llm_schemas import TranslationOut
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +118,59 @@ async def incorporate(
         entity_type=event_service.ENTITY_QUESTION,
         entity_id=question.id,
         payload={"official_qa_id": str(official_qa.id), "answer_id": str(answer.id)},
+    )
+    return official_qa
+
+
+async def register_direct(
+    db: AsyncSession, *, project_id: UUID, actor_id: UUID, question_ko: str, answer_ko: str
+) -> OfficialQA:
+    """담당자 직접 등록 (`05 §9` POST) — 편입을 거치지 않는 유일한 생성 경로.
+
+    - 질문 번역은 파이프라인 ① 과 **같은 프롬프트·모델**을 쓴다. `question_en` 이 재사용
+      검색(`06 §2` ②)이 임베딩하는 영어 번역문과 같은 축이어야 하기 때문이다 — 다른
+      텍스트를 넣으면 재질문이 영원히 재사용되지 않는다.
+    - `source_answer_id=None` 이 직접 등록의 표식이다. 원천 질문·답변이 없으므로 상세의
+      출처 두 필드는 `null` 로 내려간다.
+    - LLM 비용은 등록한 담당자에게 귀속된다 (`usage_scope` — 확정문 번역과 같은 규약).
+    """
+    provider = get_provider()
+    async with llm_usage.usage_scope(project_id=project_id, user_id=actor_id):
+        translated = await provider.complete_json(
+            system=prompts.TRANSLATE_SYSTEM,
+            user=question_ko,  # ⚠️ 장식 금지 (prompts 독스트링 — ① 과 같은 규약)
+            schema=TranslationOut,
+            model=env_settings.llm_model_translate,
+            step=STEP_TRANSLATE,
+        )
+        question_en = translated["content_en"]
+        answer_en = await provider.translate(answer_ko, "ko", "en")
+        # ② 재사용 검색과 같은 축 — **영어 번역문**을 임베딩한다 (`06 §2` ②).
+        embedding = (await provider.embed([question_en]))[0]
+
+    official_qa = OfficialQA(
+        project_id=project_id,
+        question_ko=question_ko,
+        question_en=question_en,
+        answer_ko=answer_ko,
+        answer_en=answer_en,
+        question_embedding=embedding,
+        source_answer_id=None,
+        status=OFFICIAL_QA_STATUS_ACTIVE,
+    )
+    db.add(official_qa)
+    await db.flush()
+
+    await event_service.record_event(
+        db,
+        project_id=project_id,
+        type=event_service.EVENT_OFFICIAL_QA_CREATED,
+        actor_id=actor_id,
+        # 질문 스코프 규약(`event_service` 주석)을 따르되, 원천 질문이 없으므로 entity_id 만
+        # 비운다 — sourceless Q&A 의 suspend/archive 가 남기는 모양과 같다.
+        entity_type=event_service.ENTITY_QUESTION,
+        entity_id=None,
+        payload={"official_qa_id": str(official_qa.id), "source": "direct"},
     )
     return official_qa
 
@@ -251,7 +311,12 @@ async def _reused_answers(db: AsyncSession, official_qa_id: UUID) -> list[Answer
 
 
 async def _source_question_id(db: AsyncSession, official_qa: OfficialQA) -> UUID | None:
-    """이벤트를 붙일 질문 (`05 §13` 타임라인은 질문 스코프로 조회된다)."""
+    """이벤트를 붙일 질문 (`05 §13` 타임라인은 질문 스코프로 조회된다).
+
+    직접 등록(`source_answer_id=None`)은 원천 질문이 없다 — `None` 을 돌려준다.
+    """
+    if official_qa.source_answer_id is None:
+        return None
     return await db.scalar(
         select(Answer.question_id).where(Answer.id == official_qa.source_answer_id)
     )
@@ -320,8 +385,8 @@ async def to_detail(db: AsyncSession, official_qa: OfficialQA) -> OfficialQADeta
     return OfficialQADetail(
         **_to_list_item(official_qa).model_dump(),
         source_answer_id=official_qa.source_answer_id,
-        # 편입은 항상 확정된 답변에서 파생되므로(`04 §2`) 질문이 없을 수 없다.
-        source_question_id=source_question_id,  # type: ignore[arg-type]
+        # 편입 파생이면 질문이 반드시 있고, 직접 등록이면 둘 다 null 이다 (`05 §9`).
+        source_question_id=source_question_id,
     )
 
 

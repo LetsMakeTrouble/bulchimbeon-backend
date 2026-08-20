@@ -4,12 +4,14 @@
 이미 그 Q&A 를 근거로 발행된 답변은 그대로 남는다 (이력 보존).
 """
 
+import pytest
 import pytest_asyncio
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.official_qa import OFFICIAL_QA_STATUS_ARCHIVED
-from tests.helpers import API, error_code
+from tests.helpers import API, Actor, error_code
 from tests.pipeline_helpers import ask
 from tests.review_helpers import (
     RED_MARKER,
@@ -147,3 +149,158 @@ async def test_non_member_sees_a_not_found(
 
     assert response.status_code == 404
     assert error_code(response) == "NOT_FOUND"
+
+
+# --------------------------------------------------------------------------------------
+# 직접 등록 (`05 §9` POST) — 편입 없이 확정 지식을 추가한다. source_answer_id=NULL.
+# --------------------------------------------------------------------------------------
+DIRECT_QUESTION_KO = "스테이징 배포 주기는 어떻게 되나요?"
+DIRECT_ANSWER_KO = "매주 화·목 오전에 배포합니다."
+
+
+async def _register(client: AsyncClient, team: Team, body: dict, *, actor: Actor | None = None):
+    return await client.post(
+        f"{API}/projects/{team.project_id}/official-qas",
+        json=body,
+        headers=(actor or team.owner).headers,
+    )
+
+
+async def test_answerer_registers_knowledge_directly(
+    client: AsyncClient, db_session: AsyncSession, team: Team
+) -> None:
+    """201 + 상세 shape. 서버가 en 번역·임베딩을 만들고 출처 두 필드는 null 이다."""
+    from app.models.event import Event
+    from tests.pipeline_helpers import query_embedding_for
+
+    response = await _register(
+        client, team, {"question_ko": DIRECT_QUESTION_KO, "answer_ko": DIRECT_ANSWER_KO}
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["question_ko"] == DIRECT_QUESTION_KO
+    assert body["question_en"] == f"[en] {DIRECT_QUESTION_KO}", "① 과 같은 번역 규약"
+    assert body["answer_ko"] == DIRECT_ANSWER_KO
+    assert body["answer_en"] == f"[en] {DIRECT_ANSWER_KO}"
+    assert body["status"] == "active"
+    assert body["source_answer_id"] is None, "직접 등록은 원천 답변이 없다"
+    assert body["source_question_id"] is None
+
+    # 상세 GET 도 같은 null 출처를 내려준다.
+    detail = await client.get(f"{API}/official-qas/{body['id']}", headers=team.asker.headers)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["source_answer_id"] is None
+    assert detail.json()["source_question_id"] is None
+
+    # 임베딩은 **영어 번역문** 축이다 (`06 §2` ② — incorporate 와 같은 축).
+    row = (await official_qas_of(db_session, team.project_id))[0]
+    assert row.source_answer_id is None
+    expected = query_embedding_for(DIRECT_QUESTION_KO)
+    assert list(row.question_embedding)[:5] == pytest.approx(expected[:5], abs=1e-5)
+
+    # 이벤트 — 질문 스코프 규약이되 원천 질문이 없어 entity_id 는 비운다. 표식은 payload 다.
+    event = await db_session.scalar(
+        select(Event).where(Event.type == "official_qa.created", Event.actor_id.is_not(None))
+    )
+    assert event is not None
+    assert event.payload["source"] == "direct"
+    assert event.payload["official_qa_id"] == body["id"]
+    assert event.entity_id is None
+    assert str(event.actor_id) == team.owner.id
+
+
+async def test_asker_cannot_register_knowledge(
+    client: AsyncClient, db_session: AsyncSession, team: Team
+) -> None:
+    response = await _register(
+        client,
+        team,
+        {"question_ko": DIRECT_QUESTION_KO, "answer_ko": DIRECT_ANSWER_KO},
+        actor=team.asker,
+    )
+
+    assert response.status_code == 403
+    assert error_code(response) == "FORBIDDEN_ROLE"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"question_ko": "   ", "answer_ko": DIRECT_ANSWER_KO},
+        {"question_ko": DIRECT_QUESTION_KO, "answer_ko": "   "},
+        {"question_ko": DIRECT_QUESTION_KO},
+    ],
+)
+async def test_blank_or_missing_body_is_a_validation_error(
+    client: AsyncClient, db_session: AsyncSession, team: Team, body: dict
+) -> None:
+    """공백만·누락은 400 `VALIDATION_ERROR` 다 (`05 §1.4` 전역 핸들러 규약)."""
+    response = await _register(client, team, body)
+
+    assert response.status_code == 400
+    assert error_code(response) == "VALIDATION_ERROR"
+
+
+async def test_direct_knowledge_is_reused_for_a_similar_question(
+    client: AsyncClient, db_session: AsyncSession, team: Team
+) -> None:
+    """직접 등록 Q&A 도 재사용 판정(`06 §2` ②)에 그대로 걸린다 — 같은 축이라는 증명."""
+    registered = await _register(
+        client, team, {"question_ko": DIRECT_QUESTION_KO, "answer_ko": DIRECT_ANSWER_KO}
+    )
+    assert registered.status_code == 201, registered.text
+
+    accepted = await ask(client, team.asker, team.project_id, DIRECT_QUESTION_KO)
+    answer = await answer_of(db_session, accepted["question_id"])
+
+    assert answer.source == "reused"
+    assert answer.content_ko == DIRECT_ANSWER_KO, "확정 원문 그대로 — 재번역 금지 (D5)"
+    assert answer.state == "verified"
+    assert str(answer.official_qa_id) == registered.json()["id"]
+
+    row = (await official_qas_of(db_session, team.project_id))[0]
+    await db_session.refresh(row)
+    assert row.reuse_count == 1
+
+
+async def test_direct_knowledge_survives_suspend_and_restore(
+    client: AsyncClient, db_session: AsyncSession, team: Team
+) -> None:
+    """출처 없는 Q&A 도 재검토·복귀 전이가 깨지지 않는다 (이벤트의 질문 스코프가 비어도)."""
+    from app.models.official_qa import OFFICIAL_QA_STATUS_ACTIVE, OFFICIAL_QA_STATUS_UNDER_REVIEW
+    from app.services import official_qa_service
+    from tests.pipeline_helpers import as_uuid
+
+    registered = await _register(
+        client, team, {"question_ko": DIRECT_QUESTION_KO, "answer_ko": DIRECT_ANSWER_KO}
+    )
+    assert registered.status_code == 201, registered.text
+    row = (await official_qas_of(db_session, team.project_id))[0]
+
+    await official_qa_service.suspend(db_session, row, project_id=as_uuid(team.project_id))
+    assert row.status == OFFICIAL_QA_STATUS_UNDER_REVIEW
+
+    await official_qa_service.restore(db_session, row, project_id=as_uuid(team.project_id))
+    assert row.status == OFFICIAL_QA_STATUS_ACTIVE
+
+
+async def test_direct_knowledge_archives_cleanly(
+    client: AsyncClient, db_session: AsyncSession, team: Team
+) -> None:
+    registered = await _register(
+        client, team, {"question_ko": DIRECT_QUESTION_KO, "answer_ko": DIRECT_ANSWER_KO}
+    )
+    official_qa_id = registered.json()["id"]
+
+    response = await client.delete(
+        f"{API}/official-qas/{official_qa_id}", headers=team.owner.headers
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == OFFICIAL_QA_STATUS_ARCHIVED
+
+    listing = await client.get(
+        f"{API}/projects/{team.project_id}/official-qas", headers=team.asker.headers
+    )
+    assert listing.json()["total"] == 0

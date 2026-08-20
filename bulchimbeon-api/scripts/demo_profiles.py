@@ -145,9 +145,11 @@ BULCHIMBEON = DemoProfile(
         "Prefer concise answers with identifiers in backticks."
     ),
     answerer=DemoUser("alex@bulchimbeon.example", "Alex Rivera", "en", "America/Los_Angeles"),
-    # 질문자는 GlobalMart 와 같은 계정을 쓴다 — 로그인 안내가 늘어나지 않고,
-    # 로그인하면 프로젝트 목록에 두 데모가 함께 보인다.
-    askers=GLOBALMART.askers,
+    # 질문자는 **jisoo 하나로 통일**한다 (2026-08-20 결정). GlobalMart 와 같은 계정이라
+    # 로그인 안내가 늘어나지 않고, 로그인하면 프로젝트 목록에 두 데모가 함께 보인다.
+    # 이력 115건도 전부 jisoo 소유다 — minjun 몫 57건은 픽스처에서 jisoo 로 재귀속했다
+    # (`seed/bulchimbeon/history.json`). minjun 은 GlobalMart 질문자로만 남는다.
+    askers=GLOBALMART.askers[:1],
     seed_dir=PROJECT_ROOT / "seed" / "bulchimbeon",
     documents=(
         ("frontend-guide.md", "Bulchimbeon Web Client Guide"),
@@ -178,7 +180,8 @@ BULCHIMBEON = DemoProfile(
     settings_overrides={"daily_llm_call_limit": 1000},
     # 데모 관리자 계정(mike)이 이 프로젝트도 담당자로 관리한다 — 로그인 하나로 두 데모의
     # 관리자 화면(전체 질문 115건 + 작성자, 카드 인박스)을 모두 보여 주기 위해서다.
-    # Alex 는 질문자로 남는다 (`ensure_admin` — 픽스처의 이력 주인이라 유저를 지우면 안 된다).
+    # Alex 는 교체 후 탈퇴 처리된다 (`retire_previous_answerer`, D18 — status 전환이라
+    # 이력은 남는다. 유저 행도 남긴다 — 픽스처의 카드 확정·알림이 그 계정을 가리킨다).
     admin=GLOBALMART.answerer,
     #
     # 한때 여기에 `similarity_floor` 0.325 를 넣었다. 한국어 문서를 영어 질의로만 찾던

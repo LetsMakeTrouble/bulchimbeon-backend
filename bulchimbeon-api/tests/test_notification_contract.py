@@ -66,7 +66,7 @@ def test_notification_schema_literal_matches_the_model() -> None:
 
 
 def test_sse_events_match_the_api_contract() -> None:
-    """`05 §12.3` — 9종. `ping` 은 §12.2 의 하트비트이므로 이 목록에 없다."""
+    """`05 §12.3` — 10종 (`message.created` 포함). `ping` 은 §12.2 의 하트비트라 목록에 없다."""
     assert set(_sse_events_from_contract()) == set(sse_manager.SSE_EVENTS)
-    assert len(sse_manager.SSE_EVENTS) == 9
+    assert len(sse_manager.SSE_EVENTS) == 10
     assert sse_manager.SSE_PING not in sse_manager.SSE_EVENTS

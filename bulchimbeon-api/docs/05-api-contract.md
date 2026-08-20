@@ -449,6 +449,53 @@
 
 ---
 
+## 6.1 대화 메시지 `/projects/{id}/messages` (멤버 전원)
+
+**사람 간 양방향 대화 채널**이다. 대화모드 질문(§6)은 질문자 단방향 발화였고 담당자가
+발화할 곳이 없었다 — 이 채널은 `questions` 와 분리된 별도 리소스이며 **멤버면 역할 무관**
+읽고 쓴다 (비멤버는 403 `NOT_MEMBER`). AI 답변·알림·브리핑은 붙지 않는다.
+
+| 메서드 | 경로 | 권한 | 설명 |
+| --- | --- | --- | --- |
+| GET | `/projects/{id}/messages?limit=&offset=` | 멤버 | 목록. **`created_at` 오름차순** (채팅 화면 순서) |
+| POST | `/projects/{id}/messages` | 멤버 | `{content}` → 201 생성된 메시지 |
+
+```json
+// POST /projects/{id}/messages 요청
+{ "content": "확인해 보겠습니다." }
+// 201
+{ "id": "cm-1", "content": "확인해 보겠습니다.",
+  "sender": { "id": "u-2", "name": "Mike", "role": "answerer" },
+  "created_at": "2026-08-20T01:12:00Z" }
+```
+
+```json
+// GET /projects/{id}/messages 200 — §1.2 페이지네이션 봉투
+{
+  "items": [
+    { "id": "cm-0", "content": "일본 리전 건은 어떻게 되고 있나요?",
+      "sender": { "id": "u-1", "name": "지수", "role": "asker" },
+      "created_at": "2026-08-20T01:10:00Z" },
+    { "id": "cm-1", "content": "확인해 보겠습니다.",
+      "sender": { "id": "u-2", "name": "Mike", "role": "answerer" },
+      "created_at": "2026-08-20T01:12:00Z" }
+  ],
+  "total": 2, "limit": 20, "offset": 0
+}
+```
+
+| 필드 | 설명 |
+| --- | --- |
+| `content` | 메시지 본문. 빈 문자열·공백만이면 400 `VALIDATION_ERROR` (§1.4 — 요청 형식 오류는 400이다) |
+| `sender` | `{id, name, role}` — `role` 은 **이 프로젝트에서의** `project_members.role` (`answerer` \| `asker`). 프론트는 이 값으로 말풍선을 가른다 |
+| `created_at` | 서버 시각. 목록은 이 값 오름차순이다 |
+
+- 새 메시지는 SSE `message.created` (§12.3)로 **프로젝트 활성 멤버 전원**(발신자 포함 —
+  다른 탭·기기 동기화)에게 통지된다. 프론트는 수신 시 이 목록을 재조회한다 (§12.2 규약).
+- 알림함(§11) 레코드는 만들지 않는다 — 대화는 알림이 아니라 화면 갱신으로 따라간다.
+
+---
+
 ## 7. 확인 카드 큐 `/review-cards` (담당자 전용)
 
 | 메서드 | 경로 | 설명 |
@@ -846,6 +893,7 @@ Accept: text/event-stream
 | `notification.created` | `{notification_id, type}` | 본인 |
 | `notification.unread_count` | `{count}` | 본인 (**스트림 시작 시 1회**) |
 | `sync.completed` | `{integration_id, new_documents, new_versions}` | 담당자 |
+| `message.created` | `{message_id, project_id}` | 프로젝트 활성 멤버 전원 (발신자 포함 — 다른 탭·기기 동기화) |
 
 - `document.ingested.status`: `ready` \| `failed`. 수신 시 `GET /projects/{id}/documents` 재조회로 목록을 갱신한다.
   이 이벤트가 오기 전까지 해당 버전은 검색 대상이 아니다 (§4).
@@ -856,7 +904,7 @@ Accept: text/event-stream
 
 ### GET `/projects/{id}/events?entity_type=question&entity_id=q-9&limit=`
 질문/답변 타임라인 (기능 5.3). `{ items: [ {type, actor: {id,name}|null, payload, created_at} ] }`
-- `type` 값은 `04 §5`와 1:1이다: `question.created` `question.status_changed` `question.graded` `answer.published` `answer.reused` `answer.reuse_missed` `answer.expired` `feedback.created` `card.created` `card.viewed` `card.approved` `card.edited` `card.rejected` `card.deferred` `card.kept` `official_qa.created` `official_qa.suspended` `official_qa.archived` `lesson.candidate` `lesson.approved` `lesson.deleted` `document.version_activated` `answers.review_cascade` `member.joined` `answerer.transferred` `sync.run`
+- `type` 값은 `04 §5`와 1:1이다: `question.created` `question.status_changed` `question.graded` `answer.published` `answer.reused` `answer.reuse_missed` `answer.expired` `feedback.created` `card.created` `card.viewed` `card.approved` `card.edited` `card.rejected` `card.deferred` `card.kept` `official_qa.created` `official_qa.suspended` `official_qa.archived` `lesson.candidate` `lesson.approved` `lesson.deleted` `document.version_activated` `answers.review_cascade` `member.joined` `answerer.transferred` `sync.run` `message.created`
 
 > 비율 지표의 `value: null`은 "표본 없음"을 뜻한다 — 프론트는 0%가 아니라 「측정 전」을 표시한다. (`grade_accuracy[]`는 `sufficient`/`message`로 별도 표현)
 

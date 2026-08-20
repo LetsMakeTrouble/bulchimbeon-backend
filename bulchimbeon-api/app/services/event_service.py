@@ -61,6 +61,11 @@ EVENT_LESSON_CANDIDATE = "lesson.candidate"
 EVENT_LESSON_APPROVED = "lesson.approved"
 EVENT_LESSON_DELETED = "lesson.deleted"
 
+# 대화 메시지 (`04 §5`, `05 §6.1`). 질문 스코프가 아니라 **자체 스코프**
+# (`entity_type='message'`)다 — 메시지는 어떤 질문의 여정에도 속하지 않는다.
+# member.joined 가 같은 규약이다.
+EVENT_MESSAGE_CREATED = "message.created"
+
 # M8 외부 연동 (`04 §5` 의 마지막 타입).
 #
 # ⚠️ **연동 스코프**다 — 질문 스코프 규약의 예외이며, 문서 스코프 둘과 같은 이유다:

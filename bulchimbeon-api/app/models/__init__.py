@@ -10,6 +10,7 @@
 """
 
 from app.models.briefing_run import BriefingRun
+from app.models.conversation_message import ConversationMessage
 from app.models.document import Chunk, Document, DocumentVersion
 from app.models.event import Event
 from app.models.integration import Integration
@@ -28,6 +29,7 @@ __all__ = [
     "AnswerCitation",
     "BriefingRun",
     "Chunk",
+    "ConversationMessage",
     "Document",
     "DocumentVersion",
     "Event",

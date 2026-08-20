@@ -33,6 +33,8 @@ erDiagram
     users ||--o{ notifications : ""
     users ||--o{ questions : ""
     users ||--o{ feedbacks : ""
+    projects ||--o{ conversation_messages : ""
+    users ||--o{ conversation_messages : ""
 ```
 
 - `projects ||--o| guidelines` — **0 또는 1**. 신규 프로젝트는 `guidelines` 행이 없으며, 최초 저장 시 생성된다(upsert).
@@ -196,6 +198,19 @@ erDiagram
 | deliver_after | timestamptz NULL | **NULL = 즉시 발송**, 값 = 그 시각(다음 브리핑) 이후 발송 — 비긴급 카드 알림 보류용 (룰 6) |
 | read_at | timestamptz NULL | |
 
+### conversation_messages (사람 간 양방향 대화 채널)
+| id | uuid PK | |
+| project_id | uuid FK projects **CASCADE** | 메시지는 프로젝트 밖에서 의미가 없다 |
+| sender_id | uuid FK users | 발신자. 역할 무관 — 담당자·질문자 모두 쓴다 (`05 §6.1`) |
+| content | text NOT NULL | 본문 |
+| created_at | timestamptz | 목록 정렬 키 (오름차순) |
+
+- **`questions` 와 분리된 별도 채널**이다 (사용자 결정). 대화모드 질문(§2 questions.mode)은
+  질문자 단방향 발화로 그대로 두고, 담당자가 발화하는 양방향 대화는 여기 쌓인다.
+- append-only 라 `updated_at` 이 없다 (`events` 와 같은 규약). AI·알림·브리핑은 붙지 않는다.
+- 인덱스: `(project_id, created_at)` — 목록 조회가 유일한 조회 패턴이다.
+- 생성 시 `message.created` 이벤트(§5)와 SSE `message.created` (`05 §12.3`)가 발행된다.
+
 ### events (이력 — 지표의 단일 원천)
 | id | uuid PK | |
 | project_id | uuid FK | |
@@ -283,12 +298,13 @@ erDiagram
 
 ## 5. 이벤트 타입 (지표 매핑)
 
-`question.created` `question.status_changed`(payload: from, to) `question.graded`(payload: grade, matching_rate, elapsed_ms) `answer.published` `answer.reused` `answer.reuse_missed`(payload: best_similarity) `answer.expired` `feedback.created`(verdict) `card.created` `card.viewed` `card.approved` `card.edited` `card.rejected` `card.deferred` `card.kept`(payload: bulk) `official_qa.created` `official_qa.suspended` `official_qa.archived` `lesson.candidate` `lesson.approved` `lesson.deleted` `document.version_activated` `answers.review_cascade`(payload: count) `member.joined` `answerer.transferred` `sync.run`
+`question.created` `question.status_changed`(payload: from, to) `question.graded`(payload: grade, matching_rate, elapsed_ms) `answer.published` `answer.reused` `answer.reuse_missed`(payload: best_similarity) `answer.expired` `feedback.created`(verdict) `card.created` `card.viewed` `card.approved` `card.edited` `card.rejected` `card.deferred` `card.kept`(payload: bulk) `official_qa.created` `official_qa.suspended` `official_qa.archived` `lesson.candidate` `lesson.approved` `lesson.deleted` `document.version_activated` `answers.review_cascade`(payload: count) `member.joined` `answerer.transferred` `sync.run` `message.created`
 
 - `answer.reuse_missed`: 재사용 후보를 찾았으나 임계값 미달(또는 LLM 동일성 게이트 `no`)로 재사용하지 않고 새로 생성한 경우. **재질문 즉답률의 분모**를 만든다 (D26).
 - `question.status_changed`: §6.1의 모든 전이에서 발행. `held → answered`(카드 확정) 추적의 단일 원천.
 - `answer-option` 확정은 `05 §7.2`에 따라 `edit`과 동일 처리이므로 `card.edited`(payload에 `selected_option_index`)로 기록한다.
 - `sync.run`: 연동 동기화 1회의 결과. **`entity_type='integration'`** 이며(질문 스코프 규약의 예외 — 한 번의 동기화가 여러 문서에 걸친다) payload는 `{provider, status, scanned, new_documents, new_versions, unchanged, skipped, repaired, restored, failed[]}`다. 열거 자체가 실패하면 `fatal`이 붙는다. **`failed[]`가 실패 파일 목록이 사는 유일한 곳**이다 (`08 §6`, 사용자 결정 2026-08-08).
+- `message.created`: 대화 메시지(§2 conversation_messages) 생성. **`entity_type='message'`** 다 — 질문 스코프 규약의 예외로, 메시지는 어떤 질문의 여정에도 속하지 않는다 (`member.joined` 와 같은 자체 스코프 규약).
 - **등급 산출 증적**: `question.graded`의 `payload`에는 `S_raw`(= `sim_raw`) · `S`(리스케일 후) · `G_raw`(프루닝 전) · `G_final` · `removed_sentences`(무근거로 제거된 문장)를 **전부 기록**한다. 환각 방어 2겹의 증적이며 캘리브레이션 재산출 근거다.
 
 | 지표 | 계산 |

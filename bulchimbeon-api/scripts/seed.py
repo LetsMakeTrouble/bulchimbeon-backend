@@ -77,6 +77,8 @@ from app.models.notification import Notification  # noqa: E402
 from app.models.official_qa import OfficialQA  # noqa: E402
 from app.models.project import (  # noqa: E402
     MEMBER_STATUS_ACTIVE,
+    MEMBER_STATUS_LEFT,
+    ROLE_ANSWERER,
     Guideline,
     Project,
     ProjectMember,
@@ -334,6 +336,7 @@ async def ensure_admin(db: AsyncSession, project: Project, profile: DemoProfile)
     ⚠️ 역할 스왑은 단일 UPDATE 가 아니라 `transfer_answerer` 의 4문 절차다 — 부분 UNIQUE 는
     DEFERRABLE 이 아니다 (`04 §7`, D16). 구담당자는 질문자로 프로젝트에 남는다 —
     픽스처의 카드 확정·알림이 그 계정을 가리키므로 지우면 이력이 깨진다.
+    (활성 멤버 목록에서 빼는 것은 다음 단계 `retire_previous_answerer` 가 한다 — D18.)
     """
     if profile.admin is None:
         return
@@ -361,7 +364,43 @@ async def ensure_admin(db: AsyncSession, project: Project, profile: DemoProfile)
         new_answerer_id=admin.id,
     )
     await db.commit()
-    log(f"· 관리자 지정: {admin.email} → '{project.name}' 담당자 (구담당자는 질문자로 남는다)")
+    log(f"· 관리자 지정: {admin.email} → '{project.name}' 담당자")
+
+
+async def retire_previous_answerer(
+    db: AsyncSession, project: Project, profile: DemoProfile
+) -> None:
+    """구담당자(`profile.answerer`)를 탈퇴 처리한다 — 활성 멤버를 관리자+질문자만 남긴다.
+
+    탈퇴는 행 삭제가 아니라 status 전환이다 (D18) — 이력(카드 확정·알림·이벤트)이 그
+    계정을 가리키므로 유저도 멤버십 행도 남기고, 활성 멤버 목록에서만 뺀다. 재실행 멱등
+    (이미 left 면 no-op).
+
+    ⚠️ `ensure_admin`(담당자 교체) **뒤에** 불러야 한다 — 담당자는 교체 없이 떠날 수
+    없으므로(D17) 교체 전이면 여기서 멈춘다.
+    """
+    if profile.admin is None or profile.admin.email == profile.answerer.email:
+        return
+
+    user = await db.scalar(select(User).where(User.email == profile.answerer.email))
+    if user is None:
+        return
+    member = await db.scalar(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id == user.id,
+        )
+    )
+    if member is None or member.status == MEMBER_STATUS_LEFT:
+        return
+    if member.role == ROLE_ANSWERER:
+        raise SystemExit(
+            f"{profile.answerer.email} 가 아직 담당자다 — `ensure_admin` 교체가 먼저다 (D17)."
+        )
+
+    await project_service.leave_project(db, member)
+    await db.commit()
+    log(f"· 구담당자 탈퇴 처리: {profile.answerer.email} (status=left — 이력은 남는다, D18)")
 
 
 async def upload_seed_documents(
@@ -900,6 +939,7 @@ async def main(argv: list[str] | None = None) -> int:
         await upload_seed_documents(db, project, answerer, profile)
         await assert_chunk_count(db, project, profile)
         await ensure_admin(db, project, profile)
+        await retire_previous_answerer(db, project, profile)
 
         if args.from_fixture is not None:
             path = (

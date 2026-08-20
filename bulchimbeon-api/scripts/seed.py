@@ -67,6 +67,7 @@ from app.config import DEFAULT_SETTINGS, settings  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.database import AsyncSessionLocal  # noqa: E402
 from app.models.briefing_run import BriefingRun  # noqa: E402
+from app.models.conversation_message import ConversationMessage  # noqa: E402
 from app.models.document import Chunk, Document, DocumentVersion  # noqa: E402
 from app.models.event import Event  # noqa: E402
 from app.models.integration import Integration  # noqa: E402
@@ -203,6 +204,8 @@ def _reset_statements(project_ids: list[UUID]) -> list[Executable]:
         .values(official_qa_id=None, similar_official_qa_id=None),
         # 사용량 기록도 프로젝트 스코프다 — 남기면 지운 프로젝트의 비용이 집계에 계속 잡힌다.
         delete(LLMUsage).where(LLMUsage.project_id.in_(project_ids)),
+        # FK 는 CASCADE 지만 project 행 삭제 전에 명시적으로 지운다 -- 커버리지 가드가 본다.
+        delete(ConversationMessage).where(ConversationMessage.project_id.in_(project_ids)),
         delete(Lesson).where(Lesson.project_id.in_(project_ids)),
         delete(AnswerCitation).where(AnswerCitation.answer_id.in_(answer_ids)),
         delete(Feedback).where(Feedback.answer_id.in_(answer_ids)),

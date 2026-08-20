@@ -170,7 +170,7 @@ erDiagram
 | answer_ko | text | **확정 한국어 원문 — 불변** (룰 4·D5) |
 | answer_en | text | |
 | question_embedding | **vector(1536)** | 재사용 검색용, HNSW. 차원은 리터럴 고정(문서 상단) |
-| source_answer_id | uuid FK | |
+| source_answer_id | uuid FK NULL | 편입 원천 답변. **NULL = 담당자 직접 등록** (`05 §9` POST) |
 | status | text | `active` \| `under_review` \| `archived` — under_review 중 재사용 금지 (D7) |
 | correct_count | int | 맞았다 누적 |
 | reuse_count | int | 재질문 즉답률 원천 |

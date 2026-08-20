@@ -726,6 +726,7 @@
 | --- | --- | --- | --- |
 | GET | `/projects/{id}/official-qas?query=&limit=` | 멤버 | 확정 지식 목록/검색 (query는 키워드 매칭) |
 | GET | `/official-qas/{id}` | 멤버 | 상세 (ko/en 쌍, 출처 답변, reuse_count, status) |
+| POST | `/projects/{id}/official-qas` | **담당자** | **직접 등록** — 편입 없이 확정 지식 추가, 201 |
 | DELETE | `/official-qas/{id}` | **담당자** | **`status`를 `archived`로 전환** (물리 삭제 아님) |
 
 ```json
@@ -747,6 +748,29 @@
 - `query`는 **키워드 매칭**이다(ko/en 질문·답변 본문 부분일치). 벡터 검색은 재사용 판정
   (`06 §2` ②)의 몫이며 이 화면과 섞지 않는다.
 - `source_question_id`는 "이 지식이 어느 질문에서 나왔는가"의 딥링크용이다 (§6 상세로 이동).
+  **직접 등록된 Q&A는 출처가 없으므로 `source_answer_id`/`source_question_id` 둘 다 `null`이다.**
+
+```json
+// POST /projects/{id}/official-qas — 담당자 직접 등록 (편입 없이 지식 추가)
+// 요청
+{ "question_ko": "스테이징 배포 주기는 어떻게 되나요?", "answer_ko": "매주 화·목 오전에 배포합니다." }
+// 201 — GET /official-qas/{id} 와 동일 shape. 직접 등록은 출처가 null 이다.
+{ "id":"oq-8", "question_ko":"스테이징 배포 주기는 어떻게 되나요?",
+  "question_en":"What is the staging deploy cadence?",
+  "answer_ko":"매주 화·목 오전에 배포합니다.", "answer_en":"We deploy every Tuesday and Thursday morning.",
+  "status":"active", "correct_count":0, "reuse_count":0,
+  "created_at":"2026-08-20T02:00:00Z",
+  "source_answer_id":null, "source_question_id":null }
+```
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| question_ko | string | 필수. 공백만이면 400 `VALIDATION_ERROR` |
+| answer_ko | string | 필수. 공백만이면 400 `VALIDATION_ERROR` |
+
+- en 번역과 질문 임베딩은 **서버가 만든다** (임베딩은 영어 번역문 — 재사용 판정 `06 §2` ②와
+  같은 축). 등록 즉시 재사용 대상이다.
+- 질문자는 403 `FORBIDDEN_ROLE`.
 
 ```json
 // DELETE /official-qas/{id} 200

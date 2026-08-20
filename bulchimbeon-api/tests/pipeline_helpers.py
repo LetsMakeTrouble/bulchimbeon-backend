@@ -142,10 +142,10 @@ async def seed_official_qa(
     answer_en: str = "Within 30 days of purchase.",
     status: str = OFFICIAL_QA_STATUS_ACTIVE,
 ) -> OfficialQA:
-    """공식 Q&A 를 만든다.
+    """공식 Q&A 를 **편입 파생** 모양으로 만든다 — 원천 질문·답변 한 쌍을 먼저 붙인다.
 
-    `official_qas.source_answer_id` 는 NOT NULL 이다 (`04 §2`) — 공식 Q&A 는 항상 확정된
-    답변에서 파생되기 때문이다. 그래서 질문·답변 한 쌍을 먼저 만들어 붙인다.
+    `source_answer_id=NULL` 인 직접 등록 Q&A (`05 §9` POST) 는 API 로 만드는 것이 정석이다
+    (`test_official_qas.py` 참조).
     """
     origin_question = Question(
         project_id=as_uuid(project_id),

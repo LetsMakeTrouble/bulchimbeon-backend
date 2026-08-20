@@ -58,9 +58,10 @@ class OfficialQA(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Vector(EMBEDDING_DIM_FIXED), nullable=False
     )
 
-    # 공식 Q&A 는 항상 확정된 답변에서 파생된다 (`06 §3`). 임의 생성 경로는 없다.
-    source_answer_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("answers.id"), nullable=False
+    # 확정된 답변에서 편입될 때의 원천 (`06 §3`). **NULL = 담당자 직접 등록** (`05 §9` POST)
+    # — 원천 질문·답변이 없는 유일한 경로다.
+    source_answer_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("answers.id"), nullable=True
     )
 
     # `under_review` · `archived` 는 재사용·유사 첨부 대상에서 제외된다 (D7·D20).
